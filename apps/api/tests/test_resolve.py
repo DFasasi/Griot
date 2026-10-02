@@ -71,13 +71,13 @@ def test_resolve_spotify_youtube_and_unknown(setup):
     assert r[0]["track_id"] == tracks[0].id and r[0]["isrc"] == "USAAA0000001"
     assert r[1]["artist"] == "New Artist" and r[1]["preview_url"] == "p2"
     assert r[3]["track_id"] == tracks[5].id
-    wanted = client.get("/wanted", headers={"Authorization": "Bearer dev-token"}).json()
+    wanted = client.get("/wanted", headers={"Authorization": "Bearer test-token"}).json()
     assert [w["key"] for w in wanted] == ["USNEW0000002"]
 
 
 def test_preview_then_full_submission_upgrades_same_entry(setup):
     client, tracks, repo = setup
-    auth = {"Authorization": "Bearer dev-token"}
+    auth = {"Authorization": "Bearer test-token"}
     prev = make_tracks(n=1, seed=77)[0]
     prev.id, prev.isrc, prev.tier = "isrc:USNEW0000002", "USNEW0000002", "B"
     prev.analyzer.full_audio = False
@@ -104,7 +104,7 @@ def test_preview_then_full_submission_upgrades_same_entry(setup):
     client.post(
         "/submissions",
         json=[full.model_dump(mode="json", by_alias=True)],
-        headers={"Authorization": "Bearer dev-token"},
+        headers={"Authorization": "Bearer test-token"},
     )
     t = client.get("/tracks/isrc:USNEW0000002").json()
     assert t["tier"] == "A" and t["analyzer"]["full_audio"] is True

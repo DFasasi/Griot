@@ -145,7 +145,7 @@ def export(out: Path, home: Path = HomeOpt) -> None:
 def submit(
     home: Path = HomeOpt,
     api: str = typer.Option(os.environ.get("GRIOT_API_URL", "http://localhost:8000")),
-    token: str = typer.Option(os.environ.get("GRIOT_SUBMIT_TOKEN", "dev-token")),
+    token: str = typer.Option(os.environ.get("GRIOT_SUBMIT_TOKEN", ""), help="Submit token for the API"),
 ) -> None:
     """Upload features (never audio) to the Griot catalog."""
     store = Store(home)

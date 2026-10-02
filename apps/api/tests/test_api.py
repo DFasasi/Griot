@@ -56,7 +56,7 @@ def test_submissions_require_token_and_update_catalog(client):
     new = make_tracks(n=2, seed=99)
     docs = [t.model_dump(mode="json", by_alias=True) for t in new]
     assert client.post("/submissions", json=docs).status_code == 401
-    r = client.post("/submissions", json=docs, headers={"Authorization": "Bearer dev-token"})
+    r = client.post("/submissions", json=docs, headers={"Authorization": "Bearer test-token"})
     assert r.json() == {"accepted": [t.id for t in new]}
     assert client.get("/health").json()["tracks"] == 802
     track = client.get(f"/tracks/{new[0].id}").json()
@@ -78,7 +78,7 @@ def test_submission_with_foreign_embedding_space_is_rejected(client):
     r = client.post(
         "/submissions",
         json=[odd.model_dump(mode="json", by_alias=True)],
-        headers={"Authorization": "Bearer dev-token"},
+        headers={"Authorization": "Bearer test-token"},
     )
     assert r.status_code == 422 and "embedding space" in r.json()["detail"]
 
@@ -90,3 +90,12 @@ def test_merge_prefers_clean_sources_over_flagged_rips():
     rip.global_.bpm = clean.global_.bpm + 9
     clean.external_ids["quality_flags"] = "ok"
     assert merge([rip, clean]).global_.bpm == clean.global_.bpm
+
+
+def test_submissions_disabled_without_configured_tokens(monkeypatch, tracks):
+    monkeypatch.delenv("GRIOT_SUBMIT_TOKENS")
+    c = TestClient(create_app(BridgeService(MemoryRepo(list(tracks)))))
+    doc = tracks[0].model_dump(mode="json", by_alias=True)
+    assert (
+        c.post("/submissions", json=[doc], headers={"Authorization": "Bearer dev-token"}).status_code == 503
+    )

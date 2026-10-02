@@ -141,6 +141,8 @@ class Agent:
             store = self.store()
             rows = store.unsubmitted()
             self.job.total = len(rows)
+            if not self.token:
+                raise RuntimeError("GRIOT_SUBMIT_TOKEN is not set; add it to .env to share features")
             headers = {"Authorization": f"Bearer {self.token}"}
             with httpx.Client(base_url=self.api_url, headers=headers, timeout=60) as c:
                 for i in range(0, len(rows), 25):
@@ -300,7 +302,7 @@ def serve(port: int = DEFAULT_PORT, home: Path = DEFAULT_HOME, open_browser: boo
     agent = Agent(
         home,
         os.environ.get("GRIOT_API_URL", "http://127.0.0.1:8000"),
-        os.environ.get("GRIOT_SUBMIT_TOKEN", "dev-token"),
+        os.environ.get("GRIOT_SUBMIT_TOKEN", ""),
     )
     if open_browser:
         threading.Timer(1.0, lambda: __import__("webbrowser").open(f"http://127.0.0.1:{port}")).start()

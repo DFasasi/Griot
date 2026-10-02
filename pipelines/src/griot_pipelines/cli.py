@@ -71,7 +71,7 @@ if __name__ == "__main__":
 @app.command()
 def previews(
     api: str = typer.Option(os.environ.get("GRIOT_API_URL", "http://localhost:8000")),
-    token: str = typer.Option(os.environ.get("GRIOT_SUBMIT_TOKEN", "dev-token")),
+    token: str = typer.Option(os.environ.get("GRIOT_SUBMIT_TOKEN", ""), help="Submit token for the API"),
     limit: int = typer.Option(50, help="Queue items to process this run"),
 ) -> None:
     """Analyse 30 s Deezer previews for queued songs nobody has analysed yet (tier B).

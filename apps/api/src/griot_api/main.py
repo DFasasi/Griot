@@ -59,9 +59,13 @@ def create_app(service: BridgeService | None = None) -> FastAPI:
         return app.state.service
 
     Svc = Annotated[BridgeService, Depends(svc)]
-    tokens = set(os.environ.get("GRIOT_SUBMIT_TOKENS", "dev-token").split(","))
+    # Comma-separated submit tokens. There is deliberately no default: an unconfigured
+    # server accepts no submissions rather than a guessable built-in token.
+    tokens = {t.strip() for t in os.environ.get("GRIOT_SUBMIT_TOKENS", "").split(",") if t.strip()}
 
     def submitter(authorization: Annotated[str | None, Header()] = None) -> str:
+        if not tokens:
+            raise HTTPException(503, "submissions are not configured on this server (GRIOT_SUBMIT_TOKENS)")
         token = (authorization or "").removeprefix("Bearer ").strip()
         if token not in tokens:
             raise HTTPException(401, "invalid submit token")

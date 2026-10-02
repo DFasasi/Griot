@@ -26,7 +26,7 @@ def test_pg_submit_merge_bridge_feedback(repo):
     tracks = make_tracks(n=60, dim=512, lyr_dim=384, seed=4)
     client = TestClient(create_app(BridgeService(repo)))
     docs = [t.model_dump(mode="json", by_alias=True) for t in tracks]
-    auth = {"Authorization": "Bearer dev-token"}
+    auth = {"Authorization": "Bearer test-token"}
     assert client.post("/submissions", json=docs, headers=auth).status_code == 200
     # other submitters re-analyze one track with an octave-off tempo; merge keeps the true tempo
     alt = tracks[0].model_copy(deep=True)
