@@ -270,8 +270,32 @@ def create_agent_app(agent: Agent) -> FastAPI:
     return app
 
 
+def _exit_with_parent(pid: int) -> None:
+    """Exit when the desktop shell that started us is gone (quit, crash or force-kill), so the
+    agent never outlives the app. Polls; works the same on macOS, Linux and Windows."""
+
+    def alive() -> bool:
+        try:
+            os.kill(pid, 0)
+            return True
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+
+    def watch() -> None:
+        while alive():
+            time.sleep(2)
+        os._exit(0)
+
+    threading.Thread(target=watch, daemon=True).start()
+
+
 def serve(port: int = DEFAULT_PORT, home: Path = DEFAULT_HOME, open_browser: bool = False) -> None:
     import uvicorn
+
+    if parent := os.environ.get("GRIOT_PARENT_PID"):
+        _exit_with_parent(int(parent))
 
     agent = Agent(
         home,
@@ -280,4 +304,5 @@ def serve(port: int = DEFAULT_PORT, home: Path = DEFAULT_HOME, open_browser: boo
     )
     if open_browser:
         threading.Timer(1.0, lambda: __import__("webbrowser").open(f"http://127.0.0.1:{port}")).start()
-    uvicorn.run(create_agent_app(agent), host="127.0.0.1", port=port, log_level="warning")
+    level = os.environ.get("GRIOT_AGENT_LOG_LEVEL", "warning")
+    uvicorn.run(create_agent_app(agent), host="127.0.0.1", port=port, log_level=level)

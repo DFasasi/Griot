@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The UI is served by the local agent over loopback HTTP; it needs no Tauri IPC.",
+  "windows": ["main"],
+  "permissions": []
+}

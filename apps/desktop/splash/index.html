@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Griot</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { margin: 0; height: 100vh; display: grid; place-items: center; font: 15px system-ui, -apple-system, sans-serif;
+             background: #f9f9f7; color: #52514e; }
+      @media (prefers-color-scheme: dark) { body { background: #0d0d0d; color: #c3c2b7; } }
+      h1 { font-size: 22px; margin: 0 0 6px; color: CanvasText; }
+      .bar { width: 160px; height: 3px; margin: 16px auto 0; border-radius: 3px; background: #8884; overflow: hidden; }
+      .bar i { display: block; width: 40%; height: 100%; background: #2a78d6; animation: s 1.2s ease-in-out infinite; }
+      @keyframes s { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+    </style>
+  </head>
+  <body>
+    <div style="text-align:center">
+      <h1>Griot</h1>
+      <div id="msg">Starting the local analyzer…</div>
+      <div class="bar"><i></i></div>
+    </div>
+  </body>
+</html>
