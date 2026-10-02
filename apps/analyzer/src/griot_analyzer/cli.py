@@ -18,8 +18,10 @@ from rich.table import Table
 
 from griot_analyzer.identify import FileIdentity, identify, iter_audio, track_id
 from griot_analyzer.store import DEFAULT_HOME, Store
+from griot_core.env import load_dotenv
 
 app = typer.Typer(help=__doc__, no_args_is_help=True)
+load_dotenv()
 console = Console()
 HomeOpt = typer.Option(DEFAULT_HOME, "--home", help="Analyzer state directory")
 

@@ -9,10 +9,12 @@ import typer
 from rich.console import Console
 from rich.progress import Progress
 
+from griot_core.env import load_dotenv
 from griot_core.schema import TrackFeatures
 from griot_pipelines.enrich import Enricher, EnrichStats
 
 app = typer.Typer(help=__doc__, no_args_is_help=True)
+load_dotenv()
 console = Console()
 
 

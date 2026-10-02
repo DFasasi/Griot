@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from griot_api.repo import MemoryRepo, PgRepo, Repo
 from griot_api.service import BridgeError, BridgeService
+from griot_core.env import load_dotenv
 from griot_core.schema import BridgeRequest, BridgeResponse, ImportItem, Resolution, TrackFeatures
 
 
@@ -164,4 +165,5 @@ def create_app(service: BridgeService | None = None) -> FastAPI:
     return app
 
 
+load_dotenv()
 app = create_app()
