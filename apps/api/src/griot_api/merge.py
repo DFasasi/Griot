@@ -49,3 +49,18 @@ def merge(docs: list[TrackFeatures]) -> TrackFeatures:
         if vals:
             setattr(g, attr, round(statistics.median(vals), 3))
     return base
+
+
+def carry_enrichment(new: TrackFeatures, old: TrackFeatures | None) -> TrackFeatures:
+    """Keep server-side enrichment (lyrics, popularity, external ids) across re-merges."""
+    if old is None:
+        return new
+    new.lyrics = new.lyrics or old.lyrics
+    new.external_ids = old.external_ids | new.external_ids
+    for k, v in old.popularity.model_dump().items():
+        if getattr(new.popularity, k) is None:
+            setattr(new.popularity, k, v)
+    new.isrc = new.isrc or old.isrc
+    new.mbid = new.mbid or old.mbid
+    new.explicit = new.explicit if new.explicit is not None else old.explicit
+    return new

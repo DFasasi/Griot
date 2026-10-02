@@ -8,7 +8,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Protocol
 
-from griot_api.merge import merge
+from griot_api.merge import carry_enrichment, merge
 from griot_core.schema import TrackFeatures
 
 
@@ -38,7 +38,7 @@ class MemoryRepo:
     def submit(self, submitter: str, docs: list[TrackFeatures]) -> list[str]:
         for d in docs:
             self.subs[d.id][submitter] = d
-            self.tracks[d.id] = merge(list(self.subs[d.id].values()))
+            self.tracks[d.id] = carry_enrichment(merge(list(self.subs[d.id].values())), self.tracks.get(d.id))
         return [d.id for d in docs]
 
     def save_bridge(self, request: dict, response: dict) -> str:
@@ -87,7 +87,9 @@ class PgRepo:
                     TrackFeatures.model_validate(r[0])
                     for r in c.execute("SELECT doc FROM submissions WHERE recording_id = %s", (d.id,))
                 ]
-                self._upsert(c, merge(all_docs), len(all_docs))
+                prev = c.execute("SELECT doc FROM recordings WHERE id = %s", (d.id,)).fetchone()
+                old = TrackFeatures.model_validate(prev[0]) if prev else None
+                self._upsert(c, carry_enrichment(merge(all_docs), old), len(all_docs))
         return [d.id for d in docs]
 
     def _upsert(self, c, t: TrackFeatures, n_subs: int) -> None:
