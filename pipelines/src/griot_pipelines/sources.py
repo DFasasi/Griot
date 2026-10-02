@@ -48,9 +48,20 @@ class Source:
         return None
 
 
-def _norm(s: str) -> str:
-    s = re.sub(r"\s*[\(\[].*?(remaster|version|edit|mix|feat\.?|ft\.).*?[\)\]]", "", s, flags=re.I)
-    return re.sub(r"[^a-z0-9 ]+", "", s.lower()).strip()
+_FEAT = re.compile(r"\s*[\(\[]?\b(feat\.?|ft\.?|featuring)\b.*$", re.I)
+_SUFFIX = re.compile(r"\s+-\s+.*\b(remaster(ed)?|version|edit|mix|live|mono|stereo|single)\b.*$", re.I)
+
+
+def norm(s: str | None) -> str:
+    """Comparable form of a title/artist: no featuring credits, edition suffixes or punctuation."""
+    s = _SUFFIX.sub("", _FEAT.sub("", s or ""))
+    s = re.sub(r"\s*[\(\[].*?[\)\]]", "", s)
+    s = re.sub(r"[^\w ]+", " ", s.lower())
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _same(a: str, b: str) -> bool:
+    return bool(a and b) and (a == b or a in b or b in a)
 
 
 class Deezer(Source):
@@ -64,8 +75,11 @@ class Deezer(Source):
     def search(self, artist: str, title: str, duration: float | None = None) -> dict | None:
         d = self._get("/search", q=f"{artist} {title}", limit=10)
         best, best_score = None, 0.0
+        t_norm = norm(title)
+        a_norms = [norm(a) for a in re.split(r",|&| x | and ", artist)] or [norm(artist)]
         for x in (d or {}).get("data", []):
-            score = (_norm(x["title"]) == _norm(title)) + (_norm(x["artist"]["name"]) == _norm(artist))
+            score = float(_same(norm(x["title"]), t_norm))
+            score += float(any(_same(norm(x["artist"]["name"]), a) for a in a_norms))
             if duration and abs(x.get("duration", 0) - duration) <= 5:
                 score += 0.5
             if score > best_score:

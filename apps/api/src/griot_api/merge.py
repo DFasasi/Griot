@@ -25,9 +25,13 @@ def _fold_bpm(values: list[float]) -> float:
 def merge(docs: list[TrackFeatures]) -> TrackFeatures:
     """Canonical doc: the analysis closest to the consensus, with medianed global numbers.
 
+    Preview-only (tier B) analyses are used only until a full-song analysis arrives.
+
     Submissions whose duration disagrees with the majority by > 5 s are treated as a
     different master (radio edit, live take) and dropped.
     """
+    full = [d for d in docs if d.analyzer.full_audio]
+    docs = full or docs  # a full-song analysis always outranks preview-only ones
     if len(docs) == 1:
         return docs[0]
     dur = statistics.median(d.duration_s for d in docs)
@@ -56,6 +60,8 @@ def carry_enrichment(new: TrackFeatures, old: TrackFeatures | None) -> TrackFeat
     if old is None:
         return new
     new.lyrics = new.lyrics or old.lyrics
+    if new.analyzer.full_audio and new.tier == "B":
+        new.tier = "A"
     new.external_ids = old.external_ids | new.external_ids
     for k, v in old.popularity.model_dump().items():
         if getattr(new.popularity, k) is None:

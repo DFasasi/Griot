@@ -18,6 +18,9 @@ class Repo(Protocol):
     def save_bridge(self, request: dict, response: dict) -> str: ...
     def get_bridge(self, bridge_id: str) -> dict | None: ...
     def feedback(self, bridge_id: str, position: int, rating: int) -> None: ...
+    def want(self, items: list[dict]) -> None: ...
+    def wanted(self, limit: int) -> list[dict]: ...
+    def unwant(self, keys: list[str]) -> None: ...
 
 
 class MemoryRepo:
@@ -26,6 +29,7 @@ class MemoryRepo:
         self.tracks: dict[str, TrackFeatures] = {t.id: t for t in tracks or []}
         self.bridges: dict[str, dict] = {}
         self.ratings: list[tuple[str, int, int]] = []
+        self._wanted: dict[str, dict] = {}
 
     @classmethod
     def from_jsonl(cls, path: Path) -> MemoryRepo:
@@ -53,6 +57,20 @@ class MemoryRepo:
         if bridge_id not in self.bridges:
             raise KeyError(bridge_id)
         self.ratings.append((bridge_id, position, rating))
+
+    def want(self, items: list[dict]) -> None:
+        for it in items:
+            if it["key"] in self._wanted:
+                self._wanted[it["key"]]["requests"] += 1
+            else:
+                self._wanted[it["key"]] = it | {"requests": 1}
+
+    def wanted(self, limit: int) -> list[dict]:
+        return sorted(self._wanted.values(), key=lambda x: -x["requests"])[:limit]
+
+    def unwant(self, keys: list[str]) -> None:
+        for k in keys:
+            self._wanted.pop(k, None)
 
 
 def _vec(v: list[float] | None) -> str | None:
@@ -145,3 +163,28 @@ class PgRepo:
                 "INSERT INTO bridge_feedback (bridge_id, position, rating) VALUES (%s, %s, %s)",
                 (bridge_id, position, rating),
             )
+
+    def want(self, items: list[dict]) -> None:
+        with self.pool.connection() as c, c.transaction():
+            for it in items:
+                c.execute(
+                    "INSERT INTO wanted (key, isrc, deezer_id, title, artist, duration_s, preview_url) "
+                    "VALUES (%(key)s, %(isrc)s, %(deezer_id)s, %(title)s, %(artist)s, %(duration_s)s, "
+                    "%(preview_url)s) ON CONFLICT (key) DO UPDATE SET requests = wanted.requests + 1, "
+                    "preview_url = coalesce(excluded.preview_url, wanted.preview_url), updated_at = now()",
+                    it,
+                )
+
+    def wanted(self, limit: int) -> list[dict]:
+        with self.pool.connection() as c:
+            cur = c.execute(
+                "SELECT key, isrc, deezer_id, title, artist, duration_s, preview_url, requests "
+                "FROM wanted ORDER BY requests DESC, created_at LIMIT %s",
+                (limit,),
+            )
+            cols = [d.name for d in cur.description]
+            return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
+
+    def unwant(self, keys: list[str]) -> None:
+        with self.pool.connection() as c:
+            c.execute("DELETE FROM wanted WHERE key = ANY(%s)", (keys,))

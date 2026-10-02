@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from griot_api.repo import MemoryRepo, PgRepo, Repo
 from griot_api.service import BridgeError, BridgeService
-from griot_core.schema import BridgeRequest, BridgeResponse, TrackFeatures
+from griot_core.schema import BridgeRequest, BridgeResponse, ImportItem, Resolution, TrackFeatures
 
 
 def make_repo() -> Repo:
@@ -124,6 +124,39 @@ def create_app(service: BridgeService | None = None) -> FastAPI:
         for t in b["response"]["tracks"]:
             lines += [f"#EXTINF:-1,{t['artist']} - {t['title']}", f"{t['artist']} - {t['title']}"]
         return "\n".join(lines) + "\n"
+
+    # ---------------------------------------------------------------- library import
+
+    @app.post("/resolve")
+    def resolve(s: Svc, items: list[ImportItem]) -> list[Resolution]:
+        """Map songs from any platform onto catalog recordings and report their coverage."""
+        if len(items) > 200:
+            raise HTTPException(413, "max 200 items per request")
+        return s.resolve(items)
+
+    @app.get("/import/youtube")
+    def import_youtube(playlist: Annotated[str, Query(min_length=5)]) -> list[ImportItem]:
+        from griot_pipelines.youtube import fetch_playlist
+
+        try:
+            return fetch_playlist(playlist)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
+        except RuntimeError as e:
+            raise HTTPException(503, str(e)) from None
+
+    @app.get("/wanted")
+    def wanted(s: Svc, who: Annotated[str, Depends(submitter)], limit: int = 100) -> list[dict]:
+        """Imported songs nobody has analysed yet, most-requested first."""
+        return s.repo.wanted(min(limit, 1000))
+
+    @app.get("/config")
+    def config() -> dict:
+        """Public, non-secret client settings (OAuth client ids are public by design)."""
+        return {
+            "spotify_client_id": os.environ.get("SPOTIFY_CLIENT_ID"),
+            "youtube_import": bool(os.environ.get("YOUTUBE_API_KEY")),
+        }
 
     return app
 

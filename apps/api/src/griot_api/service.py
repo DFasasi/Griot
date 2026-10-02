@@ -14,7 +14,19 @@ import numpy as np
 from griot_api.repo import Repo
 from griot_core import Catalog, Pathfinder, allocate_gaps
 from griot_core.catalog import norm_lufs
-from griot_core.schema import BridgeRequest, BridgeResponse, BridgeTrack, TrackFeatures, Transition
+from griot_core.schema import (
+    BridgeRequest,
+    BridgeResponse,
+    BridgeTrack,
+    ImportItem,
+    Resolution,
+    TrackFeatures,
+    Transition,
+)
+from griot_pipelines.resolve import Resolver
+from griot_pipelines.sources import norm
+
+DURATION_MATCH_S = 5.0
 
 
 class BridgeError(ValueError):
@@ -22,11 +34,18 @@ class BridgeError(ValueError):
 
 
 class BridgeService:
-    def __init__(self, repo: Repo, embed_text: Callable[[str], np.ndarray] | None = None) -> None:
+    def __init__(
+        self,
+        repo: Repo,
+        embed_text: Callable[[str], np.ndarray] | None = None,
+        resolver: Resolver | None = None,
+    ) -> None:
         self.repo = repo
         self.embed_text = embed_text
         self._cat: Catalog | None = None
+        self._idx: dict[str, dict] = {}
         self._lock = threading.Lock()
+        self.resolver = resolver or Resolver(lookup=self.lookup)
 
     # ------------------------------------------------------------------ catalog
 
@@ -38,16 +57,91 @@ class BridgeService:
                 if len(tracks) < 3:
                     raise BridgeError("catalog has fewer than 3 tracks")
                 self._cat = Catalog(tracks)
+                self._idx = self._build_index(self._cat.tracks)
             return self._cat
+
+    @staticmethod
+    def _build_index(tracks: list[TrackFeatures]) -> dict[str, dict]:
+        idx: dict[str, dict] = {"isrc": {}, "mbid": {}, "deezer": {}, "name": {}}
+        for t in tracks:
+            hit = (t.id, t.tier)
+            if t.isrc:
+                idx["isrc"][t.isrc.upper()] = hit
+            if t.mbid:
+                idx["mbid"][t.mbid] = hit
+            if dz := t.external_ids.get("deezer"):
+                idx["deezer"][dz] = hit
+            idx["name"].setdefault((norm(t.artist), norm(t.title)), []).append((t.duration_s, hit))
+        return idx
+
+    def lookup(
+        self,
+        isrc: str | None = None,
+        deezer_id: str | None = None,
+        artist: str | None = None,
+        title: str | None = None,
+        duration: float | None = None,
+        mbid: str | None = None,
+    ) -> tuple[str, str] | None:
+        """Find a recording already in the catalog by any identity we have for it."""
+        _ = self.catalog
+        idx = self._idx
+        if mbid and mbid in idx["mbid"]:
+            return idx["mbid"][mbid]
+        if isrc and isrc.upper() in idx["isrc"]:
+            return idx["isrc"][isrc.upper()]
+        if deezer_id and deezer_id in idx["deezer"]:
+            return idx["deezer"][deezer_id]
+        for dur, hit in idx["name"].get((norm(artist), norm(title)), []):
+            if duration is None or abs(dur - duration) <= DURATION_MATCH_S:
+                return hit
+        return None
 
     def invalidate(self) -> None:
         with self._lock:
             self._cat = None
 
     def submit(self, submitter: str, docs: list[TrackFeatures]) -> list[str]:
+        """Store analyses under the catalog's existing id for the same recording, so a file
+        analysed locally (MBID id) and a preview analysis (ISRC id) land on one entry."""
+        for d in docs:
+            try:
+                hit = self.lookup(
+                    mbid=d.mbid,
+                    isrc=d.isrc,
+                    deezer_id=d.external_ids.get("deezer"),
+                    artist=d.artist,
+                    title=d.title,
+                    duration=d.duration_s,
+                )
+            except BridgeError:  # catalog still too small to have a match
+                hit = None
+            if hit and hit[0] != d.id:
+                d.id = hit[0]
         ids = self.repo.submit(submitter, docs)
+        done = [x for d in docs for x in (d.isrc, f"dz:{d.external_ids.get('deezer')}") if x]
+        self.repo.unwant([k for k in done if k and not k.endswith(":None")])
         self.invalidate()
         return ids
+
+    def resolve(self, items: list[ImportItem]) -> list[Resolution]:
+        out = [self.resolver.resolve(it) for it in items]
+        want = [
+            {
+                "key": r.isrc or f"dz:{r.deezer_id}",
+                "isrc": r.isrc,
+                "deezer_id": r.deezer_id,
+                "title": r.title,
+                "artist": r.artist,
+                "duration_s": r.item.duration_s,
+                "preview_url": r.preview_url,
+            }
+            for r in out
+            if r.status == "missing"
+        ]
+        if want:
+            self.repo.want(want)
+        return out
 
     # ------------------------------------------------------------------ queries
 

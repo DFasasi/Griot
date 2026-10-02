@@ -661,6 +661,7 @@ source = { editable = "apps/api" }
 dependencies = [
     { name = "fastapi" },
     { name = "griot-core" },
+    { name = "griot-pipelines" },
     { name = "httpx" },
     { name = "numpy" },
     { name = "pgvector" },
@@ -673,6 +674,7 @@ dependencies = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "griot-core", editable = "packages/griot_core" },
+    { name = "griot-pipelines", editable = "pipelines" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pgvector", specifier = ">=0.3" },

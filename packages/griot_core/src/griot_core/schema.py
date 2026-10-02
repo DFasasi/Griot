@@ -178,3 +178,34 @@ class BridgeResponse(BaseModel):
     total_cost: float
     confidence: float  # share of full-song-analyzed tracks
     weights: dict[str, float]
+
+
+# ---------------------------------------------------------------- library import / cross-platform mapping
+
+Source = Literal["spotify", "youtube", "file", "manual"]
+Coverage = Literal["full", "preview", "missing", "unmatched"]
+
+
+class ImportItem(BaseModel):
+    """A song as some platform describes it. ISRC is often absent (Spotify dropped it from
+    dev-mode track objects in Feb 2026; YouTube never had it), so title/artist/duration matter."""
+
+    source: Source
+    source_id: str | None = None  # spotify track id, youtube video id, file sha1
+    title: str
+    artist: str | None = None
+    album: str | None = None
+    duration_s: float | None = None
+    isrc: str | None = None
+
+
+class Resolution(BaseModel):
+    item: ImportItem
+    status: Coverage
+    track_id: str | None = None  # Griot catalog id when the song is in the catalog
+    title: str | None = None  # canonical title/artist after matching
+    artist: str | None = None
+    isrc: str | None = None
+    deezer_id: str | None = None
+    preview_url: str | None = None
+    confidence: float = 0.0  # 0..1 match confidence
