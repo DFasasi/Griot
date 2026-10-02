@@ -1,0 +1,27 @@
+[project]
+name = "griot-analyzer"
+version = "0.1.0"
+description = "Local-first full-song analyzer: features leave the machine, audio never does"
+requires-python = ">=3.12"
+dependencies = [
+  "griot-core",
+  "typer>=0.12",
+  "rich>=13",
+  "httpx>=0.27",
+  "mutagen>=1.47",
+  "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+# Heavy models; installed separately because they are large and platform-sensitive.
+ml = ["torch>=2.3", "torchaudio>=2.3", "essentia>=2.1b6.dev1110", "muq>=0.1", "allin1>=1.1", "librosa>=0.10"]
+
+[project.scripts]
+griot = "griot_analyzer.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/griot_analyzer"]

@@ -1,0 +1,24 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+# local analyzer state & audio
+*.sqlite
+*.sqlite3
+data/
+spike/out/
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.ogg
