@@ -102,6 +102,32 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
 # --------------------------------------------------------------------------- structure
 
 
+def _to_wav(src: Path, out_dir: Path) -> Path:
+    import hashlib
+    import subprocess
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dst = out_dir / f"{hashlib.sha1(str(src).encode()).hexdigest()[:16]}.wav"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(src),
+            "-ac",
+            "2",
+            "-ar",
+            "44100",
+            str(dst),
+        ],
+        check=True,
+    )
+    return dst
+
+
 def analyze_structure(paths: list[Path], work_dir: Path) -> dict[Path, dict]:
     """Batch structure analysis; the model is loaded once per call."""
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -118,7 +144,9 @@ def analyze_structure(paths: list[Path], work_dir: Path) -> dict[Path, dict]:
     else:
         from allin1_infer import analyze
 
-        results = analyze([str(p) for p in paths], **kw)
+        # torchaudio >= 2.11 can't decode mp3/m4a without torchcodec; hand it WAV instead.
+        wavs = [_to_wav(p, work_dir / "wav") for p in paths]
+        results = analyze([str(w) for w in wavs], multiprocess=False, **kw)
     if not isinstance(results, list):
         results = [results]
     out = {}

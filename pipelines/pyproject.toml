@@ -13,6 +13,7 @@ dependencies = [
 
 [project.optional-dependencies]
 lyrics = ["sentence-transformers>=3.3", "transformers>=4.45,<4.50", "anthropic>=0.70"]
+modal = ["modal>=1.0"]
 
 [project.scripts]
 griot-enrich = "griot_pipelines.cli:app"
