@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(not DSN, reason="GRIOT_TEST_DATABASE_URL not set
 def repo():
     r = PgRepo(DSN)
     with r.pool.connection() as c:
-        c.execute("TRUNCATE recordings, submissions, bridges, bridge_feedback")
+        c.execute("TRUNCATE recordings, submissions, bridges, bridge_feedback, wanted")
     return r
 
 
@@ -51,3 +51,16 @@ def test_pg_submit_merge_bridge_feedback(repo):
     assert len(b["tracks"]) == 6
     assert client.get(f"/bridges/{b['id']}").json()["id"] == b["id"]
     assert client.post(f"/bridges/{b['id']}/feedback", json={"position": 0, "rating": -1}).status_code == 204
+
+
+def test_pg_wanted_queue_counts_requests_and_clears(repo):
+    with repo.pool.connection() as c:
+        c.execute("TRUNCATE wanted")
+    item = {"key": "USX1", "isrc": "USX1", "deezer_id": "9", "title": "T", "artist": "A", "duration_s": 200.0,
+            "preview_url": "p"}  # fmt: skip
+    repo.want([item])
+    repo.want([item | {"preview_url": None}])
+    (w,) = repo.wanted(10)
+    assert w["requests"] == 2 and w["preview_url"] == "p"  # a later null doesn't erase the preview
+    repo.unwant(["USX1"])
+    assert repo.wanted(10) == []

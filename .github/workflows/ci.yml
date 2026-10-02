@@ -15,7 +15,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --all-packages  # core deps only; ML extras are not needed for tests
       - run: uv run ruff check . && uv run ruff format --check .
-      - run: PGPASSWORD=griot psql -h localhost -U griot -d griot -f db/migrations/001_init.sql
+      - run: for f in db/migrations/*.sql; do PGPASSWORD=griot psql -v ON_ERROR_STOP=1 -h localhost -U griot -d griot -f "$f"; done
       - run: uv run pytest -q
         env:
           GRIOT_TEXT_STEERING: "0"
