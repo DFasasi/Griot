@@ -142,16 +142,24 @@ def create_app(service: BridgeService | None = None) -> FastAPI:
             raise HTTPException(413, "max 200 items per request")
         return s.resolve(items)
 
-    @app.get("/import/youtube")
-    def import_youtube(playlist: Annotated[str, Query(min_length=5)]) -> list[ImportItem]:
-        from griot_pipelines.youtube import fetch_playlist
+    class YouTubeLinks(BaseModel):
+        links: list[str]
 
+    @app.post("/import/youtube")
+    def import_youtube(body: YouTubeLinks) -> dict:
+        """Any mix of playlist and video links -> import items plus a per-link report."""
+        from griot_pipelines.youtube import fetch_links, split_links
+
+        links = [x for raw in body.links for x in split_links(raw)]
+        if not links:
+            raise HTTPException(422, "no links given")
+        if len(links) > 50:
+            raise HTTPException(413, "max 50 links per request")
         try:
-            return fetch_playlist(playlist)
-        except ValueError as e:
-            raise HTTPException(422, str(e)) from None
+            items, report = fetch_links(links)
         except RuntimeError as e:
             raise HTTPException(503, str(e)) from None
+        return {"items": [i.model_dump() for i in items], "links": report}
 
     @app.get("/wanted")
     def wanted(s: Svc, who: Annotated[str, Depends(submitter)], limit: int = 100) -> list[dict]:

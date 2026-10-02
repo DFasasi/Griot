@@ -60,6 +60,17 @@ def norm(s: str | None) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
+_VERSION = re.compile(
+    r"\b(remix|rmx|live|acoustic|sped[ -]?up|slowed|reverb|nightcore|instrumental|karaoke|cover|"
+    r"demo|reprise|extended|club mix|radio edit|a cappella|acapella|8d)\b",
+    re.I,
+)
+
+
+def _versions(title: str) -> set[str]:
+    return {m.lower().replace("-", " ") for m in _VERSION.findall(title or "")}
+
+
 def _same(a: str, b: str) -> bool:
     return bool(a and b) and (a == b or a in b or b in a)
 
@@ -73,20 +84,46 @@ class Deezer(Source):
         return None if not d or "error" in d else d
 
     def search(self, artist: str, title: str, duration: float | None = None) -> dict | None:
-        d = self._get("/search", q=f"{artist} {title}", limit=10)
-        best, best_score = None, 0.0
-        t_norm = norm(title)
+        """Best catalog match for a title/artist, or None rather than a wrong version.
+
+        Plain search ranks viral edits and tributes highly (e.g. dozens of sped-up "Bloody
+        Mary"s outrank Lady Gaga's original), so when it finds nothing acceptable we look in
+        the artist's own top tracks.
+        """
         a_norms = [norm(a) for a in re.split(r",|&| x | and ", artist)] or [norm(artist)]
-        for x in (d or {}).get("data", []):
+        d = self._get("/search", q=f"{artist} {title}", limit=10)
+        best, score = self._best((d or {}).get("data", []), title, a_norms, duration)
+        if best is None or score < 1.5:
+            best, score = self._best(self._artist_top(artist, a_norms), title, a_norms, duration)
+        if best is None or score < 1.5:
+            return None
+        return self._get(f"/track/{best['id']}")  # full record has bpm, isrc, gain
+
+    @staticmethod
+    def _best(cands: list[dict], title: str, a_norms: list[str], duration: float | None):
+        best, best_score = None, 0.0
+        t_norm, wanted_versions = norm(title), _versions(title)
+        for x in cands:
+            cand = f"{x['title']} {x.get('title_version') or ''}"
             score = float(_same(norm(x["title"]), t_norm))
             score += float(any(_same(norm(x["artist"]["name"]), a) for a in a_norms))
             if duration and abs(x.get("duration", 0) - duration) <= 5:
                 score += 0.5
+            # A remix / live / sped-up cut has different seams: never trade the original for it.
+            if _versions(cand) - wanted_versions:
+                score -= 1.0
+            if x["title"].strip().lower() == title.strip().lower():
+                score += 0.25
             if score > best_score:
                 best, best_score = x, score
-        if best is None or best_score < 1.5:
-            return None
-        return self._get(f"/track/{best['id']}")  # full record has bpm, isrc, gain
+        return best, best_score
+
+    def _artist_top(self, artist: str, a_norms: list[str]) -> list[dict]:
+        found = (self._get("/search/artist", q=artist, limit=3) or {}).get("data", [])
+        match = next((a for a in found if norm(a["name"]) in a_norms), None)
+        if match is None:
+            return []
+        return (self._get(f"/artist/{match['id']}/top", limit=100) or {}).get("data", [])
 
     def lookup(self, artist: str, title: str, isrc: str | None, duration: float | None) -> dict | None:
         return (isrc and self.by_isrc(isrc)) or self.search(artist, title, duration)

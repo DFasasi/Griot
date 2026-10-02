@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { agent, useDesktop, type AgentStatus, type LocalTrack } from "@/lib/agent";
-import { api, type Coverage } from "@/lib/api";
+import { api, type Coverage, type YouTubeLinkReport } from "@/lib/api";
 import { importItems, loadLibrary, queueWaypoint, refreshLibrary, type LibraryEntry } from "@/lib/library";
 import { disconnectSpotify, finishSpotifyLogin, spotify, spotifyConnected, startSpotifyLogin } from "@/lib/spotify";
 
@@ -143,19 +143,24 @@ function SpotifyCard({ onImported }: { onImported: () => void }) {
 
 function YouTubeCard({ onImported }: { onImported: () => void }) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [url, setUrl] = useState("");
+  const [text, setText] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<YouTubeLinkReport[]>([]);
   useEffect(() => {
     api.config().then((c) => setEnabled(c.youtube_import)).catch(() => setEnabled(false));
   }, []);
+  const links = text.split(/[\s,]+/).filter(Boolean);
   const go = async () => {
-    setBusy("Reading playlist…");
+    setBusy(`Reading ${links.length} link${links.length === 1 ? "" : "s"}…`);
     setError(null);
+    setReport([]);
     try {
-      const items = await api.youtubePlaylist(url);
-      await importItems(items, "YouTube playlist", (d, t) => setBusy(`Matching ${d}/${t}…`));
-      setUrl("");
+      const res = await api.youtubeLinks(links);
+      setReport(res.links);
+      if (res.items.length) await importItems(res.items, "YouTube", (d, t) => setBusy(`Matching ${d}/${t}…`));
+      // keep only the links that failed in the box, so they can be fixed and retried
+      setText(res.links.filter((l) => l.error).map((l) => l.link).join("\n"));
       onImported();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -165,20 +170,36 @@ function YouTubeCard({ onImported }: { onImported: () => void }) {
   };
   return (
     <Card title="YouTube / YouTube Music">
-      <p>Paste a public or unlisted playlist link. Griot reads the video titles and works out the actual recordings.</p>
-      <div className="mt-3 flex gap-2">
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://youtube.com/playlist?list=…"
-          className="min-w-0 flex-1 rounded-lg border border-line bg-page px-2.5 py-1.5 text-sm placeholder:text-muted"
-        />
-        <button className={btn} disabled={!url || !!busy || enabled === false} onClick={go}>
-          Import
+      <p>Paste playlist or video links, one per line. Public and unlisted playlists work; Griot reads the titles and works out the actual recordings.</p>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={3}
+        placeholder={"https://youtube.com/playlist?list=…\nhttps://youtu.be/…"}
+        className="mt-3 w-full resize-y rounded-lg border border-line bg-page px-2.5 py-1.5 text-sm placeholder:text-muted"
+      />
+      <div className="mt-2 flex items-center gap-2">
+        <button className={btn} disabled={!links.length || !!busy || enabled === false} onClick={go}>
+          Import{links.length > 1 ? ` ${links.length} links` : ""}
         </button>
+        {busy && <span className="text-xs text-ink">{busy}</span>}
       </div>
+      {report.length > 0 && (
+        <ul className="mt-3 space-y-1 text-xs">
+          {report.map((r, i) => (
+            <li key={i} className="flex items-baseline gap-2">
+              <span style={{ color: r.error ? "var(--critical)" : "var(--good)" }}>{r.error ? "✕" : "✓"}</span>
+              <span className="min-w-0 flex-1 truncate text-muted" title={r.link}>
+                {r.link}
+              </span>
+              <span className="shrink-0 text-ink-2">
+                {r.error ?? (r.kind === "playlist" ? `${r.count} videos` : "1 video")}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
       {enabled === false && <p className="mt-2 text-xs text-muted">Not configured: set YOUTUBE_API_KEY on the API server.</p>}
-      {busy && <p className="mt-2 text-xs text-ink">{busy}</p>}
       {error && <p className="mt-2 text-xs" style={{ color: "var(--critical)" }}>{error}</p>}
     </Card>
   );

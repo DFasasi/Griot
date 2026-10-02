@@ -7,6 +7,10 @@ const KEY = "griot.library.v1";
 
 export type LibraryEntry = Resolution & { origin: string; added: number };
 
+// Matching is rate-limited by Deezer (~2 calls per song), so keep each request short enough
+// for any proxy in front of the API (dev server, desktop agent, hosting) and update progress often.
+const BATCH = 20;
+
 const itemKey = (i: ImportItem) => `${i.source}:${i.source_id ?? `${i.artist}|${i.title}`}`;
 
 export function loadLibrary(): LibraryEntry[] {
@@ -29,11 +33,11 @@ export async function importItems(
 ): Promise<LibraryEntry[]> {
   const existing = new Map(loadLibrary().map((e) => [itemKey(e.item), e]));
   const fresh = items.filter((i) => !existing.has(itemKey(i)));
-  for (let i = 0; i < fresh.length; i += 100) {
-    const res = await api.resolve(fresh.slice(i, i + 100));
+  for (let i = 0; i < fresh.length; i += BATCH) {
+    const res = await api.resolve(fresh.slice(i, i + BATCH));
     res.forEach((r) => existing.set(itemKey(r.item), { ...r, origin, added: Date.now() }));
     saveLibrary([...existing.values()]);
-    onProgress?.(Math.min(i + 100, fresh.length), fresh.length);
+    onProgress?.(Math.min(i + BATCH, fresh.length), fresh.length);
   }
   return [...existing.values()];
 }
@@ -42,11 +46,11 @@ export async function importItems(
 export async function refreshLibrary(onProgress?: (done: number, total: number) => void) {
   const entries = loadLibrary();
   const out: LibraryEntry[] = [];
-  for (let i = 0; i < entries.length; i += 100) {
-    const chunk = entries.slice(i, i + 100);
+  for (let i = 0; i < entries.length; i += BATCH) {
+    const chunk = entries.slice(i, i + BATCH);
     const res = await api.resolve(chunk.map((e) => e.item));
     res.forEach((r, j) => out.push({ ...chunk[j], ...r }));
-    onProgress?.(Math.min(i + 100, entries.length), entries.length);
+    onProgress?.(Math.min(i + BATCH, entries.length), entries.length);
   }
   saveLibrary(out);
   return out;

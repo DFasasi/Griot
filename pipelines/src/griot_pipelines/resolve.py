@@ -19,24 +19,58 @@ from griot_pipelines.sources import Deezer, norm
 
 Lookup = Callable[..., tuple[str, str] | None]  # -> (track_id, tier) or None
 
-_NOISE = re.compile(
-    r"\s*[\(\[\{][^\)\]\}]*\b(official|video|audio|lyrics?|visuali[sz]er|hd|hq|4k|mv|m/v|clip|"
-    r"music video|explicit|clean|remaster(ed)?|live session|performance)\b[^\)\]\}]*[\)\]\}]",
+_NOISE_WORDS = re.compile(
+    r"\b(official|video|audio|lyrics?|visuali[sz]er|hd|hq|4k|mv|m/v|clip|music video|explicit|clean|"
+    r"remaster(ed)?|live session|performance)\b",
     re.I,
 )
+_VERSION_WORDS = re.compile(
+    r"\b(remix|live|acoustic|sped up|slowed|instrumental|cover|extended|acapella)\b", re.I
+)
+_BRACKETS = re.compile(r"\s*[\(\[\{]([^\)\]\}]*)[\)\]\}]")
+_QUOTED = re.compile(r"^(?P<artist>.*?)\s*[‘'\"“](?P<song>.+?)[’'\"”]\s*(?P<rest>.*)$")
 _CHANNEL_NOISE = re.compile(r"\s*(-\s*topic|vevo|official|music|records)\s*$", re.I)
 
 
+def _clean_brackets(t: str) -> str:
+    """Drop "(Official Video)"-style groups but keep version info: "(Remix - Official Video)" -> "(Remix)"."""
+
+    def repl(m: re.Match) -> str:
+        inner = m.group(1)
+        if not _NOISE_WORDS.search(inner):
+            return m.group(0)
+        versions = _VERSION_WORDS.findall(inner)
+        return f" ({' '.join(v.title() for v in versions)})" if versions else ""
+
+    return _BRACKETS.sub(repl, t).strip()
+
+
+def _latin_alias(artist: str) -> str:
+    """ "정국 (Jung Kook)" -> "Jung Kook"; catalogs index the romanised name."""
+    m = re.fullmatch(r"(.*?)\s*\(([^)]+)\)", artist.strip())
+    if m and not m.group(1).isascii() and m.group(2).isascii():
+        return m.group(2).strip()
+    return re.sub(r"\s*\([^)]*\)", "", artist).strip() or artist
+
+
 def parse_youtube_title(title: str, channel: str | None) -> tuple[str | None, str]:
-    """('Artist - Song (Official Video)', 'ArtistVEVO') -> ('Artist', 'Song')."""
-    t = _NOISE.sub("", title).strip()
-    t = re.sub(r"\s*\|.*$", "", t)  # "Song | Album Trailer"
+    """('Artist - Song (Official Video)', 'ArtistVEVO') -> ('Artist', 'Song').
+
+    Also handles K-pop style "Artist 'Song' Official MV" and keeps version words.
+    """
+    t = re.sub(r"\s*\|.*$", "", title)  # "Song | Album Trailer"
+    t = _clean_brackets(t)
     for sep in (" - ", " – ", " — ", " ~ "):
         if sep in t:
             artist, song = t.split(sep, 1)
-            return artist.strip(), song.strip().strip('"“”')
+            return _latin_alias(artist.strip()), song.strip().strip('"“”‘’')
+    q = _QUOTED.match(t)
+    if q and q.group("artist").strip() and not q.group("rest").strip(" ").replace(".", "").isalnum():
+        rest = _NOISE_WORDS.sub("", q.group("rest")).strip()
+        if not rest:
+            return _latin_alias(q.group("artist")), q.group("song").strip()
     artist = _CHANNEL_NOISE.sub("", channel or "").strip() or None
-    return artist, t.strip('"“”')
+    return artist, _NOISE_WORDS.sub("", t).strip().strip('"“”‘’').strip()
 
 
 @dataclass

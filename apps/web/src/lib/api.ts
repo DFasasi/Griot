@@ -80,7 +80,11 @@ export const api = {
   m3uUrl: (id: string) => `${API_BASE}/bridges/${id}/m3u`,
   config: () => req<{ spotify_client_id: string | null; youtube_import: boolean }>("/config"),
   resolve: (items: ImportItem[]) => req<Resolution[]>("/resolve", { method: "POST", body: JSON.stringify(items) }),
-  youtubePlaylist: (url: string) => req<ImportItem[]>(`/import/youtube?playlist=${encodeURIComponent(url)}`),
+  youtubeLinks: (links: string[]) =>
+    req<{ items: ImportItem[]; links: YouTubeLinkReport[] }>("/import/youtube", {
+      method: "POST",
+      body: JSON.stringify({ links }),
+    }),
 };
 
 export type ImportItem = {
@@ -92,6 +96,8 @@ export type ImportItem = {
   duration_s?: number | null;
   isrc?: string | null;
 };
+
+export type YouTubeLinkReport = { link: string; kind: "playlist" | "video" | null; count: number; error: string | null };
 
 export type Coverage = "full" | "preview" | "missing" | "unmatched";
 
