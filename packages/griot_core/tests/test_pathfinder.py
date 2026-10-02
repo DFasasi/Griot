@@ -122,3 +122,14 @@ def test_catalog_keeps_dominant_embedding_space():
     tracks = make_tracks(n=20, seed=5) + make_tracks(n=3, dim=16, seed=6)
     cat = Catalog(tracks)
     assert len(cat) == 20 and len(cat.dropped) == 3 and cat.space[1] == 64
+
+
+def test_same_recording_under_another_id_is_never_repeated():
+    tracks = make_tracks(n=300, seed=12)
+    dup = tracks[0].model_copy(deep=True)
+    dup.id = "local:duplicate-file"
+    tracks.append(dup)
+    cat = Catalog(tracks)
+    leg = Pathfinder(cat, max_per_artist=99).bridge([0, 1], [6])
+    keys = [cat.rec_key[i] for i in leg.path]
+    assert len(keys) == len(set(keys))

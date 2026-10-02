@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -15,8 +16,15 @@ SILENCE_LUFS = -45.0
 
 
 def norm_lufs(x: np.ndarray | float) -> np.ndarray | float:
-    """Map loudness (LUFS) to a 0..1 energy scale; mastered music sits around -24..-4."""
-    return np.clip((np.asarray(x, dtype=np.float64) + 24.0) / 20.0, 0.0, 1.0)
+    """Map loudness (LUFS) to a 0..1 energy scale; masters range from ~-30 (quiet acoustic,
+    older releases) to ~-4 (modern loud pop)."""
+    return np.clip((np.asarray(x, dtype=np.float64) + 30.0) / 26.0, 0.0, 1.0)
+
+
+def recording_key(artist: str, title: str) -> str:
+    """Same-recording key across ids (a file analysed twice, an excerpt vs the full file)."""
+    clean = lambda s: re.sub(r"[^\w ]+", " ", re.sub(r"\s*[\(\[].*?[\)\]]", "", s.lower())).split()  # noqa: E731
+    return " ".join(clean(artist)) + "|" + " ".join(clean(title))
 
 
 def _unit(m: np.ndarray) -> np.ndarray:
@@ -82,6 +90,7 @@ class Catalog:
         n = len(t)
         self.ids = [x.id for x in t]
         self.index = {x.id: i for i, x in enumerate(t)}
+        self.rec_key = [recording_key(x.artist, x.title) for x in t]
         self.artist_key = [(x.artist_ids[0] if x.artist_ids else x.artist.lower()) for x in t]
 
         self.full = _unit(np.array([x.embeddings.full for x in t], dtype=np.float32))

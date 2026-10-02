@@ -152,15 +152,20 @@ class Pathfinder:
             layers.append(cand)
             pcosts.append(self._position_cost(cand, target, positions[i], arc, steer))
 
+        used_recs = {cat.rec_key[u] for u in used}
+
         def ok(path: tuple[int, ...], x: int) -> bool:
             if x in used or x in path:
+                return False
+            rk = cat.rec_key[x]
+            if rk in used_recs or any(cat.rec_key[p] == rk for p in path):
                 return False
             ak = cat.artist_key[x]
             return artists[ak] + sum(cat.artist_key[p] == ak for p in path) < self.max_per_artist
 
         # paths[node_pos] -> list of (cost, path tuple); layer 0 seeded from S
         c0 = transition_cost(cat, [s], layers[0], w)[0] + pcosts[0]
-        paths = [[(float(c0[j]), (int(x),))] for j, x in enumerate(layers[0])]
+        paths = [[(float(c0[j]), (int(x),))] if ok((), int(x)) else [] for j, x in enumerate(layers[0])]
 
         for i in range(1, n):
             prev, cur = layers[i - 1], layers[i]

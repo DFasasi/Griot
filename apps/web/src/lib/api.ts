@@ -53,8 +53,11 @@ export type TrackDetail = {
   trajectory: { hop_s: number; energy: number[]; valence: number[] };
 };
 
+/** "/api" in dev and on desktop (both proxy); a full URL for a static web host. */
+export const API_BASE = process.env.NEXT_PUBLIC_GRIOT_API ?? "/api";
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`/api${path}`, {
+  const r = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
@@ -74,11 +77,38 @@ export const api = {
   bridge: (body: BridgeRequest) => req<Bridge>("/bridges", { method: "POST", body: JSON.stringify(body) }),
   feedback: (id: string, position: number, rating: 1 | -1) =>
     req<void>(`/bridges/${id}/feedback`, { method: "POST", body: JSON.stringify({ position, rating }) }),
-  m3uUrl: (id: string) => `/api/bridges/${id}/m3u`,
+  m3uUrl: (id: string) => `${API_BASE}/bridges/${id}/m3u`,
+  config: () => req<{ spotify_client_id: string | null; youtube_import: boolean }>("/config"),
+  resolve: (items: ImportItem[]) => req<Resolution[]>("/resolve", { method: "POST", body: JSON.stringify(items) }),
+  youtubePlaylist: (url: string) => req<ImportItem[]>(`/import/youtube?playlist=${encodeURIComponent(url)}`),
+};
+
+export type ImportItem = {
+  source: "spotify" | "youtube" | "file" | "manual";
+  source_id?: string | null;
+  title: string;
+  artist?: string | null;
+  album?: string | null;
+  duration_s?: number | null;
+  isrc?: string | null;
+};
+
+export type Coverage = "full" | "preview" | "missing" | "unmatched";
+
+export type Resolution = {
+  item: ImportItem;
+  status: Coverage;
+  track_id: string | null;
+  title: string | null;
+  artist: string | null;
+  isrc: string | null;
+  deezer_id: string | null;
+  preview_url: string | null;
+  confidence: number;
 };
 
 /** Same mapping as griot_core.catalog.norm_lufs. */
-export const normLufs = (x: number) => Math.min(1, Math.max(0, (x + 24) / 20));
+export const normLufs = (x: number) => Math.min(1, Math.max(0, (x + 30) / 26));
 
 export const TERMS = ["sound", "tempo", "key", "energy", "mood", "lyrics", "popularity"] as const;
 export const TERM_LABEL: Record<string, string> = {

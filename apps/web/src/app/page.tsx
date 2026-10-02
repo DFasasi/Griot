@@ -6,6 +6,7 @@ import { TrajectoryChart } from "@/components/TrajectoryChart";
 import { TransitionBars } from "@/components/TransitionBars";
 import { WaypointPicker } from "@/components/WaypointPicker";
 import { api, type ArcPoint, type Bridge, type TrackDetail, type TrackHit } from "@/lib/api";
+import { takeQueuedWaypoints } from "@/lib/library";
 
 const ARCS: Record<string, { label: string; arc: ArcPoint[] | null }> = {
   none: { label: "Follow the songs", arc: null },
@@ -43,6 +44,20 @@ export default function Studio() {
   const audio = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => () => audio.current?.pause(), []);
+
+  // Songs sent over from the Library page arrive as queued waypoints.
+  useEffect(() => {
+    const queued = takeQueuedWaypoints();
+    if (queued.length)
+      // localStorage exists only after mount; reading it in render would break hydration.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setWaypoints((w) => [
+        ...w,
+        ...queued
+          .filter((q) => !w.some((x) => x.id === q.id))
+          .map((q) => ({ ...q, bpm: 0, camelot: "", year: null, tier: "", tags: [] })),
+      ]);
+  }, []);
 
   const move = (i: number, d: number) =>
     setWaypoints((w) => {
@@ -101,7 +116,7 @@ export default function Studio() {
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <header className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">Griot</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Build a bridge</h1>
         <p className="mt-1 max-w-2xl text-sm text-ink-2">
           Pick the songs you want to pass through. Griot fills the gaps with real tracks so every seam
           lands, matching each song&apos;s ending to the next one&apos;s opening using full-song analysis.
