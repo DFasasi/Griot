@@ -120,7 +120,7 @@ class Pathfinder:
         if steer is not None:
             aim = aim + w["steer"] * steer / np.linalg.norm(steer)
             aim = aim / np.linalg.norm(aim)
-        c = w["progress"] * np.clip(1.0 - cat.full[cand] @ aim, 0, 2)
+        c = w["progress"] * cat.full_dist(cat.full[cand] @ aim)
         if arc:
             te = interp_arc(arc, pos, "energy")
             if te is not None:

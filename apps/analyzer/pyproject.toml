@@ -14,7 +14,16 @@ dependencies = [
 
 [project.optional-dependencies]
 # Heavy models; installed separately because they are large and platform-sensitive.
-ml = ["torch>=2.3", "torchaudio>=2.3", "essentia>=2.1b6.dev1110", "muq>=0.1", "allin1>=1.1", "librosa>=0.10"]
+ml = [
+  "torch>=2.3",
+  "librosa>=0.10",
+  "soundfile>=0.12",
+  "essentia>=2.1b6.dev1110",
+  "muq>=0.1",
+  "transformers>=4.45,<4.50",  # MuQ breaks on transformers 5.x
+  "all-in-one-mlx>=1.0; sys_platform == 'darwin'",
+  "all-in-one-infer>=0.1; sys_platform == 'linux'",
+]
 
 [project.scripts]
 griot = "griot_analyzer.cli:app"

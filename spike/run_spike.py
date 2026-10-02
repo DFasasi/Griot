@@ -26,8 +26,11 @@ for path in AUDIO:
     r = {"file": path.name}
 
     t = time.time()
-    subprocess.run(["spike/.venv/bin/allin1-mlx", str(path), "--out-dir", str(OUT / "struct")],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["spike/.venv/bin/allin1-mlx", str(path), "--out-dir", str(OUT / "struct")],
+        check=True,
+        capture_output=True,
+    )
     r["t_structure"] = time.time() - t
     struct = json.loads((OUT / "struct" / f"{path.stem}.json").read_text())
     r["allin1_bpm"] = struct.get("bpm")
@@ -42,9 +45,14 @@ for path in AUDIO:
     _, short_term, integrated, _ = es.LoudnessEBUR128(sampleRate=sr)(stereo)
     dance, _ = es.Danceability()(mono)
     r["t_essentia"] = time.time() - t
-    r.update(key=f"{key} {scale}", key_strength=round(float(strength), 2),
-             essentia_bpm=round(float(bpm), 1), lufs=round(float(integrated), 1),
-             danceability=round(float(dance), 2), st_loudness_frames=len(short_term))
+    r.update(
+        key=f"{key} {scale}",
+        key_strength=round(float(strength), 2),
+        essentia_bpm=round(float(bpm), 1),
+        lufs=round(float(integrated), 1),
+        danceability=round(float(dance), 2),
+        st_loudness_frames=len(short_term),
+    )
 
     t = time.time()
     wav, _ = librosa.load(str(path), sr=24000, mono=True)
@@ -72,5 +80,7 @@ for path in AUDIO:
 
 total = sum(r["t_structure"] + r["t_essentia"] + r["t_embed"] for r in rows)
 dur = sum(r["duration"] for r in rows)
-print(f"\nTOTAL {total:.1f}s for {dur / 60:.1f} min of audio -> {total / len(rows):.1f}s/track, "
-      f"{total / dur * 210:.1f}s per 3.5-min song")
+print(
+    f"\nTOTAL {total:.1f}s for {dur / 60:.1f} min of audio -> {total / len(rows):.1f}s/track, "
+    f"{total / dur * 210:.1f}s per 3.5-min song"
+)

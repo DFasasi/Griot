@@ -67,13 +67,13 @@ def _absdiff(a: np.ndarray, b: np.ndarray, scale: float = 1.0) -> np.ndarray:
 def transition_terms(cat: Catalog, f: np.ndarray, t: np.ndarray) -> dict[str, np.ndarray]:
     """Unweighted [0,1] terms for every pair (f[i] -> t[j]); each array has shape (len f, len t)."""
     f, t = np.asarray(f), np.asarray(t)
-    sound = np.clip(1.0 - cat.outro[f] @ cat.intro[t].T, 0, 1)
+    sound = cat.sound_dist(cat.outro[f] @ cat.intro[t].T)
     tempo = _tempo(cat.bpm[f][:, None], cat.bpm[t][None, :])
     key = _camelot(cat, f, t)
     energy = _absdiff(cat.e_end[f], cat.e_start[t], scale=0.5)
     mood = 0.5 * (_absdiff(cat.v_end[f], cat.v_start[t], 0.5) + _absdiff(cat.a_end[f], cat.a_start[t], 0.5))
     both = cat.has_lyr[f][:, None] & cat.has_lyr[t][None, :]
-    lyr = np.clip(1.0 - cat.lyr_close[f] @ cat.lyr_open[t].T, 0, 1)
+    lyr = cat.lyr_dist(cat.lyr_close[f] @ cat.lyr_open[t].T)
     lyrics = np.where(both, lyr, LYRICS_NEUTRAL)
     popularity = _absdiff(cat.log_pop[f], cat.log_pop[t], scale=3.0)
     return {

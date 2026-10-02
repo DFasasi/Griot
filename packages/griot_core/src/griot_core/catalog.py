@@ -37,6 +37,26 @@ def _edges(series: list[float], hop: float, energy: list[float]) -> tuple[float,
     return float(s[lo : lo + k].mean()), float(s[max(lo, hi - k) : hi].mean())
 
 
+CAL_PAIRS = 20000
+
+
+def _calibrate(a: np.ndarray, b: np.ndarray, rng: np.random.Generator) -> tuple[float, float]:
+    """(near, far) cosines: 99th / 1st percentile over random pairs of distinct items."""
+    n = min(len(a), len(b))
+    if n < 10:
+        return 1.0, 0.0
+    i, j = rng.integers(n, size=CAL_PAIRS), rng.integers(n, size=CAL_PAIRS)
+    keep = i != j
+    cos = np.einsum("ij,ij->i", a[i[keep]], b[j[keep]])
+    near, far = np.percentile(cos, [99, 1])
+    return float(near), float(min(far, near - 1e-3))
+
+
+def _apply_cal(cos: np.ndarray, cal: tuple[float, float]) -> np.ndarray:
+    near, far = cal
+    return np.clip((near - cos) / (near - far), 0.0, 1.0)
+
+
 @dataclass
 class Catalog:
     tracks: list[TrackFeatures]
@@ -96,6 +116,24 @@ class Catalog:
         self.tier = [x.tier for x in t]
         self.explicit = np.array([bool(x.explicit) for x in t], dtype=bool)
         self.year = np.array([x.year if x.year else -1 for x in t])
+
+        # Embedding cosines from different models live in different, narrow bands (MuQ-MuLan
+        # rarely goes below ~0.3 between songs). Calibrate each space to this catalog's own
+        # spread so a cosine maps onto a comparable 0..1 distance.
+        rng = np.random.default_rng(0)
+        self.cal_sound = _calibrate(self.outro, self.intro, rng)
+        self.cal_full = _calibrate(self.full, self.full, rng)
+        lyr = np.flatnonzero(self.has_lyr)
+        self.cal_lyr = _calibrate(self.lyr_close[lyr], self.lyr_open[lyr], rng)
+
+    def sound_dist(self, cos: np.ndarray) -> np.ndarray:
+        return _apply_cal(cos, self.cal_sound)
+
+    def full_dist(self, cos: np.ndarray) -> np.ndarray:
+        return _apply_cal(cos, self.cal_full)
+
+    def lyr_dist(self, cos: np.ndarray) -> np.ndarray:
+        return _apply_cal(cos, self.cal_lyr)
 
     def __len__(self) -> int:
         return len(self.tracks)

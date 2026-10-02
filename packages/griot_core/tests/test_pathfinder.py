@@ -97,7 +97,7 @@ def test_viterbi_is_optimal_on_unconstrained_tiny_problem():
             c += transition_cost(cat, [y], [b], w)[0, 0]
             for i, z in enumerate((x, y)):
                 t = slerp(cat.full[a], cat.full[b], (i + 1) / 3)
-                c += w["progress"] * np.clip(1 - cat.full[z] @ t, 0, 2)
+                c += w["progress"] * cat.full_dist(cat.full[z] @ t)
             best = min(best, c)
     assert leg.cost == pytest.approx(best, rel=1e-5)
 
