@@ -65,6 +65,7 @@ def analyze(
         window_embeddings,
         zero_shot,
     )
+    from griot_analyzer.quality import assess
     from griot_core.schema import TrackFeatures
 
     store = Store(home)
@@ -108,6 +109,8 @@ def analyze(
                             tier="A",
                             **feats,
                         )
+                        q = assess(path, desc, struct)
+                        tf.external_ids |= {f"quality_{k}": str(v) for k, v in q.items()}
                         store.done(ident.sha1, tf.model_dump_json(by_alias=True))
                     except Exception as e:
                         store.failed(row["sha1"], f"{e}\n{traceback.format_exc()}")
@@ -196,6 +199,19 @@ def bridge(
     if m3u:
         m3u.write_text("#EXTM3U\n" + "\n".join(paths[tracks[i].id] for i in leg.path) + "\n")
         console.print(f"wrote {m3u}")
+
+
+@app.command("app")
+def app_cmd(
+    port: int = typer.Option(51735, help="Loopback port for the desktop UI"),
+    home: Path = HomeOpt,
+    browser: bool = typer.Option(True, help="Open the UI in your browser"),
+) -> None:
+    """Run the Griot desktop agent (UI + local analyzer) on 127.0.0.1."""
+    from griot_analyzer.agent import serve
+
+    console.print(f"Griot running at [bold]http://127.0.0.1:{port}[/]")
+    serve(port=port, home=home, open_browser=browser)
 
 
 if __name__ == "__main__":

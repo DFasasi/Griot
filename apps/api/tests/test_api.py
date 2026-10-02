@@ -81,3 +81,12 @@ def test_submission_with_foreign_embedding_space_is_rejected(client):
         headers={"Authorization": "Bearer dev-token"},
     )
     assert r.status_code == 422 and "embedding space" in r.json()["detail"]
+
+
+def test_merge_prefers_clean_sources_over_flagged_rips():
+    base = make_tracks(n=1, seed=9)[0]
+    rip, clean = base.model_copy(deep=True), base.model_copy(deep=True)
+    rip.external_ids["quality_flags"] = "lossy_transcode"
+    rip.global_.bpm = clean.global_.bpm + 9
+    clean.external_ids["quality_flags"] = "ok"
+    assert merge([rip, clean]).global_.bpm == clean.global_.bpm

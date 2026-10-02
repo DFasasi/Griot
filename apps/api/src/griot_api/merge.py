@@ -32,6 +32,8 @@ def merge(docs: list[TrackFeatures]) -> TrackFeatures:
     """
     full = [d for d in docs if d.analyzer.full_audio]
     docs = full or docs  # a full-song analysis always outranks preview-only ones
+    clean = [d for d in docs if d.external_ids.get("quality_flags", "ok") == "ok"]
+    docs = clean or docs  # lossy re-encodes / odd cuts only count when nothing better exists
     if len(docs) == 1:
         return docs[0]
     dur = statistics.median(d.duration_s for d in docs)
