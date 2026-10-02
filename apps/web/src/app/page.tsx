@@ -6,7 +6,7 @@ import { TrajectoryChart } from "@/components/TrajectoryChart";
 import { TransitionBars } from "@/components/TransitionBars";
 import { WaypointPicker } from "@/components/WaypointPicker";
 import { api, type ArcPoint, type Bridge, type TrackDetail, type TrackHit } from "@/lib/api";
-import { takeQueuedWaypoints } from "@/lib/library";
+import { takeQueuedWaypoints, youtubeIds } from "@/lib/library";
 
 const ARCS: Record<string, { label: string; arc: ArcPoint[] | null }> = {
   none: { label: "Follow the songs", arc: null },
@@ -95,8 +95,20 @@ export default function Studio() {
     }
   };
 
+  const [video, setVideo] = useState<{ id: string; title: string } | null>(null);
+  const [yt, setYt] = useState<Record<string, string>>({});
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is only readable after mount
+  useEffect(() => setYt(youtubeIds()), [bridge]);
+
   const play = (id: string, url: string | null) => {
     audio.current?.pause();
+    if (yt[id] && playing !== id) {
+      // Full song via YouTube's official embedded player (songs imported from YouTube).
+      setVideo({ id: yt[id], title: bridge?.tracks.find((t) => t.id === id)?.title ?? "" });
+      setPlaying(id);
+      return;
+    }
+    setVideo(null);
     if (!url || playing === id) {
       setPlaying(null);
       return;
@@ -214,7 +226,8 @@ export default function Studio() {
                       <span className="tabular w-5 text-xs text-muted">{i + 1}</span>
                       <button
                         onClick={() => play(t.id, t.preview_url)}
-                        disabled={!t.preview_url}
+                        disabled={!t.preview_url && !yt[t.id]}
+                        title={yt[t.id] ? "Play full song (YouTube)" : "Play 30 s preview"}
                         aria-label={playing === t.id ? "Stop preview" : "Play preview"}
                         className="flex size-7 shrink-0 items-center justify-center rounded-full border border-line text-xs disabled:opacity-30"
                       >
@@ -253,6 +266,29 @@ export default function Studio() {
                     </li>
                   ))}
                 </ol>
+                {video && (
+                  <div className="mt-3 overflow-hidden rounded-lg border border-line">
+                    <div className="flex items-center justify-between bg-page px-3 py-1.5 text-xs text-ink-2">
+                      <span className="truncate">Full song · {video.title}</span>
+                      <button
+                        onClick={() => {
+                          setVideo(null);
+                          setPlaying(null);
+                        }}
+                        className="text-muted hover:text-ink"
+                      >
+                        Close
+                      </button>
+                    </div>
+                    <iframe
+                      className="aspect-video w-full"
+                      src={`https://www.youtube-nocookie.com/embed/${video.id}?autoplay=1`}
+                      title={video.title}
+                      allow="autoplay; encrypted-media; picture-in-picture"
+                      allowFullScreen
+                    />
+                  </div>
+                )}
                 <div className="mt-3 flex gap-4 text-xs">
                   <a href={api.m3uUrl(bridge.id)} className="text-accent hover:underline">Export M3U</a>
                 </div>

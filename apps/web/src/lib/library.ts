@@ -65,3 +65,11 @@ export function takeQueuedWaypoints(): PendingWaypoint[] {
   localStorage.removeItem(WP_KEY);
   return cur;
 }
+
+/** track_id -> YouTube video id, for songs the user imported from YouTube (full-length playback). */
+export function youtubeIds(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const e of loadLibrary())
+    if (e.track_id && e.item.source === "youtube" && e.item.source_id) out[e.track_id] = e.item.source_id;
+  return out;
+}

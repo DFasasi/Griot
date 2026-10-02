@@ -21,7 +21,7 @@ AcousticBrainz is **evidence for this plan**: it did exactly this, with users ru
 ### Where Griot beats Spotify/Apple
 Their recommenders mostly use collaborative filtering and optimize for engagement and familiarity. They don't handle intent ("get me from A to B"), they don't consider transitions (outro→intro), they don't use song structure, they don't offer a controllable energy/mood arc, and they don't consider lyrical narrative. Spotify also removed `audio-features`, `audio-analysis`, `recommendations`, and `related-artists` for new apps (Nov 2024), so these features can't be rebuilt on its API.
 
-## Status (2026-10-02)
+## Status (2026-10-02, updated)
 
 | Milestone | State |
 |---|---|
@@ -33,6 +33,12 @@ Their recommenders mostly use collaborative filtering and optimize for engagemen
 | Bridge engine + eval harness + baselines | Done; synthetic sanity run in `eval/results-synthetic.md` |
 | API (memory + Postgres) | Done, Postgres path tested against pg17 + pgvector |
 | Web app | Done, rendered and checked in headless Chrome (light + dark) |
+| Library import + cross-platform mapping (Spotify PKCE, YouTube playlists, files) | Done; resolver verified live on Deezer; Spotify/YouTube need client id / API key to try end to end |
+| Coverage + wanted queue + preview fallback (tier B) | Done, verified live (missing → preview → upgraded by full analysis) |
+| File quality checks (bitrate, spectral cutoff) | Done; a 96 kbps re-encode is flagged |
+| Desktop app (Tauri shell + loopback agent) | Done in dev; installer packaging (frozen agent sidecar) next |
+| Interactive About page | Done |
+| YouTube full-length playback (embed) | Done for YouTube-imported songs |
 | Spotify/Apple export, arc drawing UI, render-mix | Next |
 | Real-catalog eval + listening test + deploy | Next (needs the corpus/library runs) |
 
