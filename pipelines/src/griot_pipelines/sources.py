@@ -26,6 +26,10 @@ class RateLimiter:
             self.next = max(now, self.next) + self.interval
 
 
+class SourceUnavailable(RuntimeError):
+    """An external catalog couldn't be reached even after retries."""
+
+
 class Source:
     base: str
     rate: float
@@ -35,17 +39,26 @@ class Source:
         self.limit = RateLimiter(self.rate)
 
     def _get(self, path: str, **params) -> dict | list | None:
-        for attempt in range(3):
+        """GET with retries for throttling and transient network failures (dropped connections,
+        timeouts). Raises SourceUnavailable if the service still can't be reached."""
+        last: Exception | None = None
+        for attempt in range(4):
             self.limit.wait()
-            r = self.http.get(self.base + path, params=params or None)
+            try:
+                r = self.http.get(self.base + path, params=params or None)
+            except httpx.TransportError as e:  # disconnects, resets, timeouts
+                last = e
+                time.sleep(0.5 * 2**attempt)
+                continue
             if r.status_code == 404:
                 return None
-            if r.status_code in (429, 503):
-                time.sleep(2**attempt)
+            if r.status_code in (429, 500, 502, 503, 504):
+                last = httpx.HTTPStatusError(f"{r.status_code}", request=r.request, response=r)
+                time.sleep(0.5 * 2**attempt)
                 continue
             r.raise_for_status()
             return r.json()
-        return None
+        raise SourceUnavailable(f"{type(self).__name__} unavailable: {last}")
 
 
 _FEAT = re.compile(r"\s*[\(\[]?\b(feat\.?|ft\.?|featuring)\b.*$", re.I)

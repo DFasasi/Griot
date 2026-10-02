@@ -15,7 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from griot_core.schema import ImportItem, Resolution
-from griot_pipelines.sources import Deezer, norm
+from griot_pipelines.sources import Deezer, SourceUnavailable, norm
 
 Lookup = Callable[..., tuple[str, str] | None]  # -> (track_id, tier) or None
 
@@ -92,11 +92,15 @@ class Resolver:
             cached = key in self._cache
             d = self._cache.get(key)
         if not cached:
-            d = self.deezer.by_isrc(item.isrc) if item.isrc else None
-            if d is None and artist and title:
-                d = self.deezer.search(artist, title, item.duration_s)
-            with self._lock:
-                self._cache[key] = d
+            try:
+                d = self.deezer.by_isrc(item.isrc) if item.isrc else None
+                if d is None and artist and title:
+                    d = self.deezer.search(artist, title, item.duration_s)
+            except SourceUnavailable:
+                d = None  # leave uncached: the next re-check tries again
+            else:
+                with self._lock:
+                    self._cache[key] = d
 
         res = Resolution(item=item, status="unmatched", title=title, artist=artist, isrc=item.isrc)
         if d is not None:

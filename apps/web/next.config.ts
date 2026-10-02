@@ -9,6 +9,8 @@ const exporting = process.env.GRIOT_EXPORT === "1";
 const nextConfig: NextConfig = exporting
   ? { output: "export", trailingSlash: false, images: { unoptimized: true } }
   : {
+      // Imports make many rate-limited catalog calls; give the dev proxy room (default ~30 s).
+      experimental: { proxyTimeout: 120_000 },
       async rewrites() {
         return [{ source: "/api/:path*", destination: `${api}/:path*` }];
       },

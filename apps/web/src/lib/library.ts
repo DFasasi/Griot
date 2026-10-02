@@ -34,7 +34,8 @@ export async function importItems(
   const existing = new Map(loadLibrary().map((e) => [itemKey(e.item), e]));
   const fresh = items.filter((i) => !existing.has(itemKey(i)));
   for (let i = 0; i < fresh.length; i += BATCH) {
-    const res = await api.resolve(fresh.slice(i, i + BATCH));
+    // One retry per batch; anything already matched is saved, so re-importing resumes.
+    const res = await api.resolve(fresh.slice(i, i + BATCH)).catch(() => api.resolve(fresh.slice(i, i + BATCH)));
     res.forEach((r) => existing.set(itemKey(r.item), { ...r, origin, added: Date.now() }));
     saveLibrary([...existing.values()]);
     onProgress?.(Math.min(i + BATCH, fresh.length), fresh.length);
