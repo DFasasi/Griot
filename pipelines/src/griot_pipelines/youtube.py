@@ -154,10 +154,13 @@ def fetch_links(links: list[str], api_key: str | None = None) -> tuple[list[Impo
         except ValueError as e:
             row["error"] = str(e)
         except httpx.HTTPStatusError as e:
+            code = e.response.status_code
             row["error"] = (
-                "not found or private"
-                if e.response.status_code == 404
-                else f"YouTube error {e.response.status_code}"
+                "not found, private, or removed"
+                if code in (400, 404)
+                else "YouTube quota reached for today"
+                if code == 403
+                else f"YouTube error {code}"
             )
     if videos:
         got = {it.source_id: it for it in fetch_videos([v for _, v in videos], api_key)}

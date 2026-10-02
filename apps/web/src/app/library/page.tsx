@@ -152,15 +152,33 @@ function YouTubeCard({ onImported }: { onImported: () => void }) {
   }, []);
   const links = text.split(/[\s,]+/).filter(Boolean);
   const go = async () => {
-    setBusy(`Reading ${links.length} link${links.length === 1 ? "" : "s"}…`);
+    const unique = [...new Set(links)];
     setError(null);
     setReport([]);
+    // Small groups keep every request short (a playlist can take a few seconds), so no proxy
+    // times out, progress stays live, and one bad group only fails its own links.
+    const GROUP = 5;
+    const reports: YouTubeLinkReport[] = [];
+    const items: Parameters<typeof importItems>[0] = [];
     try {
-      const res = await api.youtubeLinks(links);
-      setReport(res.links);
-      if (res.items.length) await importItems(res.items, "YouTube", (d, t) => setBusy(`Matching ${d}/${t}…`));
+      for (let i = 0; i < unique.length; i += GROUP) {
+        const group = unique.slice(i, i + GROUP);
+        setBusy(`Reading links ${Math.min(i + GROUP, unique.length)}/${unique.length}…`);
+        try {
+          const res = await api.youtubeLinks(group);
+          reports.push(...res.links);
+          items.push(...res.items);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          reports.push(...group.map((link) => ({ link, kind: null, count: 0, error: `couldn't read (${msg})` })));
+        }
+        setReport([...reports]);
+      }
+      const seen = new Set<string>();
+      const fresh = items.filter((it) => !seen.has(it.source_id ?? it.title) && seen.add(it.source_id ?? it.title));
+      if (fresh.length) await importItems(fresh, "YouTube", (d, t) => setBusy(`Matching ${d}/${t}…`));
       // keep only the links that failed in the box, so they can be fixed and retried
-      setText(res.links.filter((l) => l.error).map((l) => l.link).join("\n"));
+      setText(reports.filter((l) => l.error).map((l) => l.link).join("\n"));
       onImported();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -180,12 +198,12 @@ function YouTubeCard({ onImported }: { onImported: () => void }) {
       />
       <div className="mt-2 flex items-center gap-2">
         <button className={btn} disabled={!links.length || !!busy || enabled === false} onClick={go}>
-          Import{links.length > 1 ? ` ${links.length} links` : ""}
+          Import{links.length > 1 ? ` ${new Set(links).size} links` : ""}
         </button>
         {busy && <span className="text-xs text-ink">{busy}</span>}
       </div>
       {report.length > 0 && (
-        <ul className="mt-3 space-y-1 text-xs">
+        <ul className="mt-3 max-h-48 space-y-1 overflow-auto pr-1 text-xs">
           {report.map((r, i) => (
             <li key={i} className="flex items-baseline gap-2">
               <span style={{ color: r.error ? "var(--critical)" : "var(--good)" }}>{r.error ? "✕" : "✓"}</span>
