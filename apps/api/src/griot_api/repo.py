@@ -1,0 +1,145 @@
+"""Storage backends. `PgRepo` is the real one; `MemoryRepo` serves tests, demos and dev
+without a database (optionally seeded from a JSONL export or the synthetic catalog)."""
+
+from __future__ import annotations
+
+import uuid
+from collections import defaultdict
+from pathlib import Path
+from typing import Protocol
+
+from griot_api.merge import merge
+from griot_core.schema import TrackFeatures
+
+
+class Repo(Protocol):
+    def all_tracks(self) -> list[TrackFeatures]: ...
+    def submit(self, submitter: str, docs: list[TrackFeatures]) -> list[str]: ...
+    def save_bridge(self, request: dict, response: dict) -> str: ...
+    def get_bridge(self, bridge_id: str) -> dict | None: ...
+    def feedback(self, bridge_id: str, position: int, rating: int) -> None: ...
+
+
+class MemoryRepo:
+    def __init__(self, tracks: list[TrackFeatures] | None = None) -> None:
+        self.subs: dict[str, dict[str, TrackFeatures]] = defaultdict(dict)
+        self.tracks: dict[str, TrackFeatures] = {t.id: t for t in tracks or []}
+        self.bridges: dict[str, dict] = {}
+        self.ratings: list[tuple[str, int, int]] = []
+
+    @classmethod
+    def from_jsonl(cls, path: Path) -> MemoryRepo:
+        lines = [x for x in path.read_text().splitlines() if x.strip()]
+        return cls([TrackFeatures.model_validate_json(x) for x in lines])
+
+    def all_tracks(self) -> list[TrackFeatures]:
+        return list(self.tracks.values())
+
+    def submit(self, submitter: str, docs: list[TrackFeatures]) -> list[str]:
+        for d in docs:
+            self.subs[d.id][submitter] = d
+            self.tracks[d.id] = merge(list(self.subs[d.id].values()))
+        return [d.id for d in docs]
+
+    def save_bridge(self, request: dict, response: dict) -> str:
+        bid = str(uuid.uuid4())
+        self.bridges[bid] = {"request": request, "response": response}
+        return bid
+
+    def get_bridge(self, bridge_id: str) -> dict | None:
+        return self.bridges.get(bridge_id)
+
+    def feedback(self, bridge_id: str, position: int, rating: int) -> None:
+        if bridge_id not in self.bridges:
+            raise KeyError(bridge_id)
+        self.ratings.append((bridge_id, position, rating))
+
+
+def _vec(v: list[float] | None) -> str | None:
+    return None if v is None else "[" + ",".join(f"{x:.6f}" for x in v) + "]"
+
+
+class PgRepo:
+    EMB_DIM, LYR_DIM = 512, 384
+
+    def __init__(self, dsn: str) -> None:
+        from psycopg_pool import ConnectionPool
+
+        self.pool = ConnectionPool(dsn, min_size=1, max_size=8, open=True)
+
+    def all_tracks(self) -> list[TrackFeatures]:
+        with self.pool.connection() as c:
+            rows = c.execute("SELECT doc FROM recordings").fetchall()
+        return [TrackFeatures.model_validate(r[0]) for r in rows]
+
+    def submit(self, submitter: str, docs: list[TrackFeatures]) -> list[str]:
+        from psycopg.types.json import Jsonb
+
+        with self.pool.connection() as c, c.transaction():
+            for d in docs:
+                c.execute(
+                    "INSERT INTO submissions (recording_id, submitter, doc) VALUES (%s, %s, %s) "
+                    "ON CONFLICT (recording_id, submitter) "
+                    "DO UPDATE SET doc = excluded.doc, created_at = now()",
+                    (d.id, submitter, Jsonb(d.model_dump(mode="json", by_alias=True))),
+                )
+                all_docs = [
+                    TrackFeatures.model_validate(r[0])
+                    for r in c.execute("SELECT doc FROM submissions WHERE recording_id = %s", (d.id,))
+                ]
+                self._upsert(c, merge(all_docs), len(all_docs))
+        return [d.id for d in docs]
+
+    def _upsert(self, c, t: TrackFeatures, n_subs: int) -> None:
+        from psycopg.types.json import Jsonb
+
+        e, g, p = t.embeddings, t.global_, t.popularity
+        lyr_ok = t.lyrics is not None and t.lyrics.open and len(t.lyrics.open) == self.LYR_DIM
+        emb_ok = len(e.full) == self.EMB_DIM
+        cols = {
+            "id": t.id, "mbid": t.mbid, "isrc": t.isrc, "title": t.title, "artist": t.artist,
+            "artist_ids": t.artist_ids, "duration_s": t.duration_s, "year": t.year,
+            "explicit": t.explicit, "tier": t.tier, "full_audio": t.analyzer.full_audio,
+            "analyzer_version": t.analyzer.version, "bpm": g.bpm, "camelot": g.camelot,
+            "lufs": g.lufs, "valence": g.valence, "arousal": g.arousal,
+            "lastfm_playcount": p.lastfm_playcount, "lb_listens": p.lb_listens,
+            "deezer_rank": p.deezer_rank, "preview_url": t.external_ids.get("deezer_preview"),
+            "external_ids": Jsonb(t.external_ids),
+            "emb_full": _vec(e.full) if emb_ok else None,
+            "emb_intro": _vec(e.intro) if emb_ok else None,
+            "emb_outro": _vec(e.outro) if emb_ok else None,
+            "lyr_open": _vec(t.lyrics.open) if lyr_ok else None,
+            "lyr_close": _vec(t.lyrics.close) if lyr_ok else None,
+            "doc": Jsonb(t.model_dump(mode="json", by_alias=True)),
+            "n_submissions": n_subs,
+        }  # fmt: skip
+        names = ", ".join(cols)
+        ph = ", ".join(f"%({k})s" for k in cols)
+        upd = ", ".join(f"{k} = excluded.{k}" for k in cols if k != "id")
+        c.execute(
+            f"INSERT INTO recordings ({names}) VALUES ({ph}) "
+            f"ON CONFLICT (id) DO UPDATE SET {upd}, updated_at = now()",
+            cols,
+        )
+
+    def save_bridge(self, request: dict, response: dict) -> str:
+        from psycopg.types.json import Jsonb
+
+        with self.pool.connection() as c:
+            row = c.execute(
+                "INSERT INTO bridges (request, response) VALUES (%s, %s) RETURNING id",
+                (Jsonb(request), Jsonb(response)),
+            ).fetchone()
+        return str(row[0])
+
+    def get_bridge(self, bridge_id: str) -> dict | None:
+        with self.pool.connection() as c:
+            row = c.execute("SELECT request, response FROM bridges WHERE id = %s", (bridge_id,)).fetchone()
+        return None if row is None else {"request": row[0], "response": row[1]}
+
+    def feedback(self, bridge_id: str, position: int, rating: int) -> None:
+        with self.pool.connection() as c:
+            c.execute(
+                "INSERT INTO bridge_feedback (bridge_id, position, rating) VALUES (%s, %s, %s)",
+                (bridge_id, position, rating),
+            )
