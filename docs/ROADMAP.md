@@ -21,6 +21,26 @@ AcousticBrainz is **evidence for this plan**: it did exactly this, with users ru
 ### Where Griot beats Spotify/Apple
 Their recommenders mostly use collaborative filtering and optimize for engagement and familiarity. They don't handle intent ("get me from A to B"), they don't consider transitions (outro→intro), they don't use song structure, they don't offer a controllable energy/mood arc, and they don't consider lyrical narrative. Spotify also removed `audio-features`, `audio-analysis`, `recommendations`, and `related-artists` for new apps (Nov 2024), so these features can't be rebuilt on its API.
 
+## Status (2026-10-02)
+
+| Milestone | State |
+|---|---|
+| M0 scaffold, contracts, CI | Done |
+| Model spike | Done — see [spike-results.md](spike-results.md) |
+| Analyzer v1 (scan/analyze/export/submit/local bridge) | Done, verified on real audio |
+| Enrichment (Deezer, ListenBrainz, Last.fm, MusicBrainz, LRCLIB, themes) | Done, verified live; Last.fm + themes need keys |
+| Modal corpus backfill | Written and import-validated; needs a Modal account + Jamendo key to run |
+| Bridge engine + eval harness + baselines | Done; synthetic sanity run in `eval/results-synthetic.md` |
+| API (memory + Postgres) | Done, Postgres path tested against pg17 + pgvector |
+| Web app | Done, rendered and checked in headless Chrome (light + dark) |
+| Spotify/Apple export, arc drawing UI, render-mix | Next |
+| Real-catalog eval + listening test + deploy | Next (needs the corpus/library runs) |
+
+Deviations from the plan: plain SQL migration instead of alembic (one schema file so far);
+`all-in-one-mlx` / `all-in-one-infer` instead of upstream `allin1` (broken with current NATTEN);
+valence/arousal/tags are zero-shot from MuQ-MuLan for v1 (a head trained on DEAM/PMEmo is a later upgrade);
+the API bridges over an in-memory catalog and keeps pgvector HNSW for when the catalog outgrows RAM.
+
 ---
 
 ## 1. Architecture overview
