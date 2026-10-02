@@ -64,3 +64,64 @@ def db(
 
 if __name__ == "__main__":
     app()
+
+
+@app.command()
+def previews(
+    api: str = typer.Option(os.environ.get("GRIOT_API_URL", "http://localhost:8000")),
+    token: str = typer.Option(os.environ.get("GRIOT_SUBMIT_TOKEN", "dev-token")),
+    limit: int = typer.Option(50, help="Queue items to process this run"),
+) -> None:
+    """Analyse 30 s Deezer previews for queued songs nobody has analysed yet (tier B).
+
+    These are stopgaps: they're marked preview-only and replaced as soon as anyone
+    submits a full-song analysis of the same recording.
+    """
+    import tempfile
+
+    import httpx
+
+    from griot_analyzer.extract import (
+        Models,
+        analyze_descriptors,
+        analyze_structure,
+        build_features,
+        window_embeddings,
+        zero_shot,
+    )
+
+    headers = {"Authorization": f"Bearer {token}"}
+    with httpx.Client(base_url=api, headers=headers, timeout=60) as c:
+        queue = c.get("/wanted", params={"limit": limit}).raise_for_status().json()
+        todo = [q for q in queue if q.get("preview_url")]
+        if not todo:
+            console.print("queue empty")
+            return
+        models, work, done = Models(), Path(tempfile.mkdtemp()), 0
+        for q in todo:
+            path = work / f"{q['key'].replace(':', '_')}.mp3"
+            try:
+                path.write_bytes(httpx.get(q["preview_url"], timeout=30).raise_for_status().content)
+                struct = analyze_structure([path], work)[path]
+                desc = analyze_descriptors(path)
+                centres, embs = window_embeddings(path, models)
+                feats = build_features(path, struct, desc, centres, embs, zero_shot(embs, models))
+                feats["analyzer"].full_audio = False
+                feats["duration_s"] = q.get("duration_s") or feats["duration_s"]
+                doc = TrackFeatures(
+                    id=f"isrc:{q['isrc']}" if q.get("isrc") else f"deezer:{q['deezer_id']}",
+                    isrc=q.get("isrc"),
+                    title=q["title"],
+                    artist=q["artist"],
+                    tier="B",
+                    external_ids={"deezer": str(q["deezer_id"]), "deezer_preview": q["preview_url"]},
+                    **feats,
+                )
+                c.post("/submissions", json=[doc.model_dump(mode="json", by_alias=True)]).raise_for_status()
+                done += 1
+                console.print(f"[green]preview analysed[/] {q['artist']} — {q['title']}")
+            except Exception as e:  # keep draining the queue
+                console.print(f"[red]failed[/] {q['artist']} — {q['title']}: {e}")
+            finally:
+                path.unlink(missing_ok=True)
+    console.print(f"{done}/{len(todo)} previews analysed")

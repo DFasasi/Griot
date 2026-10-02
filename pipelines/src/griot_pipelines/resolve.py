@@ -43,7 +43,7 @@ def parse_youtube_title(title: str, channel: str | None) -> tuple[str | None, st
 class Resolver:
     lookup: Lookup
     deezer: Deezer = field(default_factory=Deezer)
-    _cache: dict[tuple, Resolution] = field(default_factory=dict)
+    _cache: dict[tuple, dict | None] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def resolve(self, item: ImportItem) -> Resolution:
@@ -51,17 +51,20 @@ class Resolver:
         if item.source == "youtube":
             artist_guess, title = parse_youtube_title(item.title, item.artist)
             artist = artist_guess or artist
+        # Cache only the external identity (slow, rate-limited); catalog status changes as
+        # analyses arrive, so it is looked up fresh every time.
         key = (norm(artist), norm(title), round(item.duration_s or 0), item.isrc)
         with self._lock:
-            if key in self._cache:
-                return self._cache[key].model_copy(update={"item": item})
+            cached = key in self._cache
+            d = self._cache.get(key)
+        if not cached:
+            d = self.deezer.by_isrc(item.isrc) if item.isrc else None
+            if d is None and artist and title:
+                d = self.deezer.search(artist, title, item.duration_s)
+            with self._lock:
+                self._cache[key] = d
 
         res = Resolution(item=item, status="unmatched", title=title, artist=artist, isrc=item.isrc)
-        d = None
-        if item.isrc:
-            d = self.deezer.by_isrc(item.isrc)
-        if d is None and artist and title:
-            d = self.deezer.search(artist, title, item.duration_s)
         if d is not None:
             res.title, res.artist = d.get("title") or title, (d.get("artist") or {}).get("name") or artist
             res.isrc = res.isrc or d.get("isrc")
@@ -82,6 +85,4 @@ class Resolver:
             res.confidence = max(res.confidence, 0.7)
         elif d is not None:
             res.status = "missing"
-        with self._lock:
-            self._cache[key] = res
         return res

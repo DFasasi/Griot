@@ -71,3 +71,13 @@ def test_merge_folds_octave_errors_and_drops_other_masters():
     d.global_.bpm = 90.0
     m = merge([a, b, c, d])
     assert m.global_.bpm == pytest.approx(120.0, abs=1)
+
+
+def test_submission_with_foreign_embedding_space_is_rejected(client):
+    odd = make_tracks(n=1, dim=16, seed=123)[0]
+    r = client.post(
+        "/submissions",
+        json=[odd.model_dump(mode="json", by_alias=True)],
+        headers={"Authorization": "Bearer dev-token"},
+    )
+    assert r.status_code == 422 and "embedding space" in r.json()["detail"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -64,6 +65,19 @@ class Catalog:
     index: dict[str, int] = field(init=False)
 
     def __post_init__(self) -> None:
+        # Embeddings from different models/dims aren't comparable: keep the dominant space.
+        spaces = Counter((x.embeddings.model, len(x.embeddings.full)) for x in self.tracks)
+        if len(spaces) > 1:
+            self.space = spaces.most_common(1)[0][0]
+            self.dropped = [
+                x.id for x in self.tracks if (x.embeddings.model, len(x.embeddings.full)) != self.space
+            ]
+            self.tracks = [
+                x for x in self.tracks if (x.embeddings.model, len(x.embeddings.full)) == self.space
+            ]
+        else:
+            self.space = next(iter(spaces), None)
+            self.dropped = []
         t = self.tracks
         n = len(t)
         self.ids = [x.id for x in t]

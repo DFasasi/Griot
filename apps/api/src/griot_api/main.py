@@ -86,7 +86,10 @@ def create_app(service: BridgeService | None = None) -> FastAPI:
     def submissions(s: Svc, docs: list[TrackFeatures], who: Annotated[str, Depends(submitter)]) -> dict:
         if len(docs) > 500:
             raise HTTPException(413, "max 500 tracks per request")
-        return {"accepted": s.submit(who, docs)}
+        try:
+            return {"accepted": s.submit(who, docs)}
+        except BridgeError as e:
+            raise HTTPException(422, str(e)) from None
 
     @app.post("/bridges")
     def create_bridge(s: Svc, req: BridgeRequest) -> BridgeResponse:

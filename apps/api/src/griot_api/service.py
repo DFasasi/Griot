@@ -104,6 +104,13 @@ class BridgeService:
     def submit(self, submitter: str, docs: list[TrackFeatures]) -> list[str]:
         """Store analyses under the catalog's existing id for the same recording, so a file
         analysed locally (MBID id) and a preview analysis (ISRC id) land on one entry."""
+        try:
+            space = self.catalog.space
+        except BridgeError:
+            space = None
+        bad = [d.id for d in docs if space and (d.embeddings.model, len(d.embeddings.full)) != space]
+        if bad:
+            raise BridgeError(f"embedding space mismatch (catalog uses {space[0]}, {space[1]}-d): {bad[:5]}")
         for d in docs:
             try:
                 hit = self.lookup(

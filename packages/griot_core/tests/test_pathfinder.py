@@ -116,3 +116,9 @@ def test_multi_waypoint_allocation_and_arc(cat):
 def test_bridge_request_validates_gap_lengths():
     with pytest.raises(ValueError):
         BridgeRequest(waypoints=["a", "b", "c"], gap_lengths=[3])
+
+
+def test_catalog_keeps_dominant_embedding_space():
+    tracks = make_tracks(n=20, seed=5) + make_tracks(n=3, dim=16, seed=6)
+    cat = Catalog(tracks)
+    assert len(cat) == 20 and len(cat.dropped) == 3 and cat.space[1] == 64
