@@ -358,11 +358,16 @@ export default function LibraryPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [sent, setSent] = useState<Set<string>>(new Set());
 
-  // localStorage is only readable after mount.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => setEntries(loadLibrary()), []);
-
-  const reload = useCallback(() => setEntries(loadLibrary()), []);
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const reload = useCallback(() => {
+    loadLibrary()
+      .then(setEntries)
+      .catch((e) => setStorageError(`This browser blocked local storage (${e?.message ?? e}). Private windows can do this.`));
+  }, []);
+  useEffect(() => {
+    const h = setTimeout(reload, 0);
+    return () => clearTimeout(h);
+  }, [reload]);
   const refresh = useCallback(async () => {
     setBusy("Re-checking coverage…");
     try {
@@ -390,6 +395,11 @@ export default function LibraryPage() {
         </p>
       </header>
 
+      {storageError && (
+        <p className="mb-4 rounded-lg border border-line bg-surface px-3 py-2 text-sm" style={{ color: "var(--critical)" }}>
+          {storageError}
+        </p>
+      )}
       <div className="mb-6 grid gap-4 md:grid-cols-3">
         <SpotifyCard onImported={reload} />
         <YouTubeCard onImported={reload} />

@@ -97,8 +97,9 @@ export default function Studio() {
 
   const [video, setVideo] = useState<{ id: string; title: string } | null>(null);
   const [yt, setYt] = useState<Record<string, string>>({});
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is only readable after mount
-  useEffect(() => setYt(youtubeIds()), [bridge]);
+  useEffect(() => {
+    youtubeIds().then(setYt).catch(() => {});
+  }, [bridge]);
 
   const play = (id: string, url: string | null) => {
     audio.current?.pause();
