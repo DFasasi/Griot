@@ -2,28 +2,35 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { AnatomyStory } from "@/components/about/AnatomyStory";
+import { HeroBridge } from "@/components/about/HeroBridge";
+import { CountUp, Reveal } from "@/components/motion";
 import { useWidth } from "@/components/useWidth";
 
 /* ------------------------------------------------------------------ shared bits */
 
 function Section({ kicker, title, children }: { kicker: string; title: string; children: React.ReactNode }) {
   return (
-    <section className="border-t border-line py-12">
-      <p className="mb-1 text-xs font-medium uppercase tracking-wider text-accent">{kicker}</p>
-      <h2 className="mb-4 text-xl font-semibold tracking-tight">{title}</h2>
-      {children}
+    <section className="border-t border-line py-16">
+      <Reveal>
+        <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.2em]" style={{ color: "var(--gold)" }}>
+          {kicker}
+        </p>
+        <h2 className="mb-6 text-3xl font-medium tracking-tight sm:text-4xl">{title}</h2>
+      </Reveal>
+      <Reveal delay={120}>{children}</Reveal>
     </section>
   );
 }
 
 function Toggle<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
   return (
-    <div className="inline-flex rounded-lg border border-line bg-surface p-0.5 text-sm">
+    <div className="inline-flex rounded-full border border-line bg-surface p-1 text-sm">
       {options.map(([v, label]) => (
         <button
           key={v}
           onClick={() => onChange(v)}
-          className={`rounded-md px-3 py-1 ${value === v ? "bg-accent text-white" : "text-ink-2 hover:text-ink"}`}
+          className={`rounded-full px-3.5 py-1 transition-colors ${value === v ? "bg-accent text-white" : "text-ink-2 hover:text-ink"}`}
         >
           {label}
         </button>
@@ -440,6 +447,9 @@ function RouteDemo() {
             )),
           )}
           <polyline
+            key={`${mode}-${n}`}
+            className="draw-path"
+            pathLength={1}
             points={full.map((c, i) => `${cx(i)},${cy(c.e)}`).join(" ")}
             fill="none"
             stroke={mode === "griot" ? "var(--accent)" : "var(--s2)"}
@@ -484,24 +494,69 @@ function RouteDemo() {
 
 export default function About() {
   return (
-    <main className="mx-auto max-w-5xl px-4 pb-20 sm:px-6">
-      <section className="py-14">
-        <h1 className="max-w-3xl text-3xl font-semibold tracking-tight sm:text-4xl">An album that gets you from here to there, without the jolt.</h1>
-        <p className="mt-4 max-w-2xl text-base text-ink-2">
-          Pick two or more songs. Griot finds real tracks to put between them so the whole thing flows: every ending leads into the next beginning. Here
-          is how it works.
-        </p>
-        <div className="mt-6 flex gap-3 text-sm">
-          <Link href="/" className="rounded-lg bg-accent px-4 py-2 font-medium text-white">
-            Build a bridge
-          </Link>
-          <Link href="/library" className="rounded-lg border border-line px-4 py-2 hover:bg-surface">
-            Import your music
-          </Link>
+    <main>
+      <section className="glow relative overflow-hidden">
+        <div className="mx-auto max-w-5xl px-4 pb-10 pt-16 sm:px-6 sm:pt-24">
+          <Reveal>
+            <p className="mb-4 font-mono text-[11px] uppercase tracking-[0.25em] text-muted">How Griot works</p>
+            <h1 className="max-w-4xl text-4xl font-medium leading-[1.05] tracking-tight sm:text-6xl">
+              An album that gets you from here to there,{" "}
+              <em className="font-display not-italic" style={{ color: "var(--gold)", fontStyle: "italic" }}>
+                without the jolt.
+              </em>
+            </h1>
+          </Reveal>
+          <Reveal delay={150}>
+            <p className="mt-6 max-w-2xl text-lg leading-relaxed text-ink-2">
+              Pick two or more songs. Griot finds real tracks to put between them so the whole thing flows: every ending leads into the next
+              beginning. A griot is a West African storyteller and musician who carries a story from one place to the next. This is that, for your
+              music.
+            </p>
+          </Reveal>
+          <Reveal delay={250}>
+            <div className="mt-8 flex flex-wrap gap-3 text-sm">
+              <Link href="/" className="rounded-full bg-accent px-5 py-2.5 font-medium text-white shadow-[0_0_30px_var(--accent-glow)]">
+                Build a bridge
+              </Link>
+              <Link href="/library" className="rounded-full border border-line px-5 py-2.5 hover:bg-surface">
+                Import your music
+              </Link>
+            </div>
+          </Reveal>
+          <Reveal delay={350} className="mt-14">
+            <HeroBridge />
+          </Reveal>
+          <div className="mt-14 grid grid-cols-1 gap-6 border-t border-line pt-8 sm:grid-cols-3">
+            {[
+              { n: 7, label: "things scored at every seam", sub: "sound · tempo · key · energy · mood · lyrics · popularity" },
+              { n: 200, label: "candidate songs per step", sub: "the search weighs every hand-off at once" },
+              { n: 512, label: "numbers in every sound fingerprint", sub: "one for the opening, the ending, the hook, the whole" },
+            ].map((s, i) => (
+              <Reveal key={s.label} delay={i * 120}>
+                <div className="font-display text-5xl" style={{ color: i === 1 ? "var(--gold)" : "var(--accent-text)" }}>
+                  <CountUp to={s.n} />
+                </div>
+                <p className="mt-1 text-sm text-ink">{s.label}</p>
+                <p className="text-xs text-muted">{s.sub}</p>
+              </Reveal>
+            ))}
+          </div>
         </div>
       </section>
 
-      <Section kicker="The idea" title="Full songs, not snippets">
+      <div className="mx-auto max-w-5xl px-4 sm:px-6">
+      <section className="border-t border-line pt-16">
+        <Reveal>
+          <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.2em]" style={{ color: "var(--gold)" }}>
+            The idea
+          </p>
+          <h2 className="text-3xl font-medium tracking-tight sm:text-4xl">Anatomy of a song</h2>
+          <p className="mt-3 max-w-2xl text-ink-2">Scroll to follow one song from first note to last, and see what Griot pays attention to.</p>
+        </Reveal>
+        <AnatomyStory />
+      </section>
+
+      <Section kicker="Try it" title="Full songs, not snippets">
         <SnippetVsFull />
       </Section>
 
@@ -548,6 +603,24 @@ export default function About() {
           Every song only needs to be analysed once, by anyone who owns it, for everyone to benefit. Until then Griot uses the preview and tells you so.
         </p>
       </Section>
+      </div>
+
+      <section className="glow relative mt-8 overflow-hidden border-t border-line">
+        <div className="kente h-1 opacity-80" />
+        <div className="mx-auto max-w-5xl px-4 py-24 text-center sm:px-6">
+          <Reveal>
+            <h2 className="text-3xl font-medium tracking-tight sm:text-5xl">Tell the story between your songs.</h2>
+            <div className="mt-8 flex justify-center gap-3 text-sm">
+              <Link href="/" className="rounded-full bg-accent px-5 py-2.5 font-medium text-white shadow-[0_0_30px_var(--accent-glow)]">
+                Build a bridge
+              </Link>
+              <Link href="/library" className="rounded-full border border-line px-5 py-2.5 hover:bg-surface">
+                Import your music
+              </Link>
+            </div>
+          </Reveal>
+        </div>
+      </section>
     </main>
   );
 }

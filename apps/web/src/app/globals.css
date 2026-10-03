@@ -1,87 +1,230 @@
 @import "tailwindcss";
 
+/*
+ * Griot — "heritage × night studio".
+ * Night-first: indigo-black studio surfaces, an electric violet for interaction, and kente
+ * gold / terracotta / green as heritage accents. A warm-ivory light theme sits behind the
+ * toggle. Chart slots (--s1..--s7) are validated for colour-blind separation and contrast
+ * against --surface in both themes (dataviz validator).
+ */
+
 :root {
-  color-scheme: light;
-  --page: #f9f9f7;
-  --surface: #fcfcfb;
-  --ink: #0b0b0b;
-  --ink-2: #52514e;
-  --muted: #898781;
-  --grid: #e1e0d9;
-  --axis: #c3c2b7;
-  --border: rgba(11, 11, 11, 0.1);
-  --accent: #2a78d6;
-  --good: #006300;
-  --critical: #d03b3b;
-  --s1: #2a78d6;
-  --s2: #eb6834;
-  --s3: #1baf7a;
-  --s4: #eda100;
-  --s5: #e87ba4;
-  --s6: #008300;
-  --s7: #4a3aa7;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) {
-    color-scheme: dark;
-    --page: #0d0d0d;
-    --surface: #1a1a19;
-    --ink: #ffffff;
-    --ink-2: #c3c2b7;
-    --grid: #2c2c2a;
-    --axis: #383835;
-    --border: rgba(255, 255, 255, 0.1);
-    --accent: #3987e5;
-    --good: #0ca30c;
-    --s1: #3987e5;
-    --s2: #d95926;
-    --s3: #199e70;
-    --s4: #c98500;
-    --s5: #d55181;
-    --s6: #008300;
-    --s7: #9085e9;
-  }
-}
-
-:root[data-theme="dark"] {
   color-scheme: dark;
-  --page: #0d0d0d;
-  --surface: #1a1a19;
-  --ink: #ffffff;
-  --ink-2: #c3c2b7;
-  --grid: #2c2c2a;
-  --axis: #383835;
-  --border: rgba(255, 255, 255, 0.1);
-  --accent: #3987e5;
-  --good: #0ca30c;
-  --s1: #3987e5;
-  --s2: #d95926;
+  --page: #0b0910;
+  --surface: #15121f;
+  --surface-2: #1d1929;
+  --ink: #f4ede1;
+  --ink-2: #c9c0d3;
+  --muted: #8b8299;
+  --grid: #2a2536;
+  --axis: #3a3448;
+  --border: rgba(244, 237, 225, 0.09);
+  --accent: #6e4ff0; /* fills (white text on it ≥ 4.5:1) */
+  --accent-text: #ab98ff; /* links / accent text on dark surfaces */
+  --accent-glow: rgba(139, 108, 255, 0.35);
+  --gold: #e3a72f;
+  --terracotta: #d4643f;
+  --kente-green: #2fa36b;
+  --good: #3cc47c;
+  --critical: #ff6b6b;
+  --s1: #9085e9;
+  --s2: #c98500;
   --s3: #199e70;
-  --s4: #c98500;
-  --s5: #d55181;
-  --s6: #008300;
-  --s7: #9085e9;
+  --s4: #d95926;
+  --s5: #3987e5;
+  --s6: #d55181;
+  --s7: #008300;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --page: #f7f1e6;
+  --surface: #fffcf6;
+  --surface-2: #f2eadb;
+  --ink: #1a1622;
+  --ink-2: #4a4354;
+  --muted: #8a8292;
+  --grid: #e6dccb;
+  --axis: #cbbfa9;
+  --border: rgba(26, 22, 34, 0.1);
+  --accent: #5b3fe0;
+  --accent-text: #5b3fe0;
+  --accent-glow: rgba(91, 63, 224, 0.2);
+  --gold: #b97f12;
+  --terracotta: #c2522e;
+  --kente-green: #1f8a55;
+  --good: #1a7f45;
+  --critical: #c33a3a;
+  --s1: #4a3aa7;
+  --s2: #eda100;
+  --s3: #1baf7a;
+  --s4: #eb6834;
+  --s5: #2a78d6;
+  --s6: #e87ba4;
+  --s7: #008300;
 }
 
 @theme inline {
   --color-page: var(--page);
   --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
   --color-muted: var(--muted);
   --color-grid: var(--grid);
   --color-line: var(--border);
   --color-accent: var(--accent);
-  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-gold: var(--gold);
+  --color-terracotta: var(--terracotta);
+  --font-sans: var(--font-inter), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-fraunces), Georgia, "Times New Roman", serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 body {
   background: var(--page);
   color: var(--ink);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-inter), system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Accent text needs a lighter tone than accent fills on dark surfaces (unlayered beats utilities). */
+.text-accent {
+  color: var(--accent-text);
+}
+
+h1,
+h2,
+.font-display {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-optical-sizing: auto;
+  letter-spacing: -0.015em;
 }
 
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* A thin woven stripe in kente colours — the heritage motif. */
+.kente {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--gold) 0 18px,
+    var(--terracotta) 18px 24px,
+    var(--kente-green) 24px 36px,
+    var(--accent) 36px 40px,
+    var(--gold) 40px 46px,
+    #0b0910 46px 50px
+  );
+}
+
+/* Soft studio glow behind hero content. */
+.glow {
+  background:
+    radial-gradient(60% 50% at 20% 0%, var(--accent-glow), transparent 70%),
+    radial-gradient(40% 40% at 90% 10%, rgba(227, 167, 47, 0.12), transparent 70%);
+}
+
+/* Scroll reveal: elements start slightly lowered and transparent, then settle in. */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 700ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    transform 700ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.reveal.in {
+  opacity: 1;
+  transform: none;
+}
+
+@keyframes bar-pulse {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.eq-bar {
+  transform-origin: bottom;
+  animation: bar-pulse 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .eq-bar {
+    animation: none;
+  }
+  * {
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Hero: bars breathe, a playhead sweeps, the seam pulses. */
+@keyframes bar-breathe {
+  0%,
+  100% {
+    transform: scaleY(0.82);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.hero-bar {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: bar-breathe 2.4s ease-in-out infinite;
+}
+@keyframes sweep {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(1000px);
+  }
+}
+.playhead {
+  animation: sweep 9s linear infinite;
+}
+@keyframes seam-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.seam-pulse {
+  animation: seam-pulse 3s ease-in-out infinite;
+}
+/* Route demo: the chosen path draws itself whenever it changes. */
+@keyframes draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.draw-path {
+  stroke-dasharray: 1;
+  animation: draw 900ms cubic-bezier(0.3, 0.6, 0.2, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-bar,
+  .playhead,
+  .seam-pulse,
+  .draw-path {
+    animation: none;
+  }
+  .playhead {
+    display: none;
+  }
 }

@@ -156,8 +156,6 @@ class Analyzer:
         import tempfile
         import time
 
-        import httpx
-
         from griot_analyzer.extract import (
             analyze_descriptors,
             analyze_structure,
@@ -170,16 +168,15 @@ class Analyzer:
         started = time.time()
         work = Path(tempfile.mkdtemp())
         paths, meta = [], {}
+        skipped = []
         for q in batch:
             p = work / f"{q['key'].replace(':', '_')}.mp3"
             try:
-                p.write_bytes(
-                    httpx.get(q["preview_url"], timeout=60, follow_redirects=True).raise_for_status().content
-                )
+                p.write_bytes(_download_preview(q))
                 paths.append(p)
                 meta[p] = q
-            except httpx.HTTPError:
-                continue  # previews expire; skipped songs stay queued
+            except Exception as e:  # no preview available any more: stays queued
+                skipped.append(f"{q['artist']} — {q['title']}: {e}")
         try:
             structs = analyze_structure(paths, work)
         except Exception:
@@ -200,7 +197,10 @@ class Analyzer:
                     title=q["title"],
                     artist=q["artist"],
                     tier="B",
-                    external_ids={"deezer": str(q["deezer_id"]), "deezer_preview": q["preview_url"]},
+                    external_ids={
+                        "deezer": str(q["deezer_id"]),
+                        "deezer_preview": q.get("fresh_preview", ""),
+                    },
                     **feats,
                 )
                 docs.append(doc.model_dump(mode="json", by_alias=True))
@@ -209,7 +209,13 @@ class Analyzer:
             finally:
                 p.unlink(missing_ok=True)
         hf_cache.commit()
-        return {"docs": docs, "failed": failed, "seconds": time.time() - started, "asked": len(batch)}
+        return {
+            "docs": docs,
+            "failed": failed,
+            "skipped": skipped,
+            "seconds": time.time() - started,
+            "asked": len(batch),
+        }
 
 
 @app.local_entrypoint()
@@ -227,6 +233,34 @@ def main(n: int = 1000, batch: int = 16, out: str = "data/corpus/jamendo.jsonl")
             done += len(docs)
             print(f"{done}/{len(tracks)} analyzed")
     print(json.dumps({"written": done, "out": str(dst)}))
+
+
+def _download_preview(q: dict) -> bytes:
+    """Deezer preview links are signed and expire after a few hours; when the stored one has
+    lapsed, ask Deezer for a fresh link by track id."""
+    import httpx
+
+    r = httpx.get(q["preview_url"], timeout=60, follow_redirects=True) if q.get("preview_url") else None
+    if r is not None and r.status_code == 200 and r.content:
+        q["fresh_preview"] = q["preview_url"]
+        return r.content
+    import random
+    import time
+
+    for attempt in range(6):
+        track = httpx.get(f"https://api.deezer.com/track/{q['deezer_id']}", timeout=30).json()
+        # Many GPU containers share egress; Deezer answers its rate limit with HTTP 200 + code 4.
+        if (track.get("error") or {}).get("code") == 4:
+            time.sleep(1.5 * 2**attempt * (0.5 + random.random()))
+            continue
+        break
+    else:
+        raise RuntimeError("Deezer rate limit: try again later")
+    url = track.get("preview")
+    if not url:
+        raise RuntimeError("Deezer has no preview for this track")
+    q["fresh_preview"] = url
+    return httpx.get(url, timeout=60, follow_redirects=True).raise_for_status().content
 
 
 L4_PER_HOUR = 0.80  # USD, Modal list price; container time also includes model loading
@@ -251,14 +285,15 @@ def previews(n: int = 200, batch: int = 10) -> None:
         ]
         print(f"{len(queue)} queued songs with previews")
         batches = [queue[i : i + batch] for i in range(0, len(queue), batch)]
-        started, gpu_s, done, failed = time.time(), 0.0, 0, []
+        started, gpu_s, done, failed, skipped = time.time(), 0.0, 0, [], []
         for res in Analyzer().analyze_previews.map(batches, order_outputs=False):
             gpu_s += res["seconds"]
             failed += res["failed"]
+            skipped += res["skipped"]
             if res["docs"]:
                 c.post("/submissions", json=res["docs"]).raise_for_status()
                 done += len(res["docs"])
-            print(f"{done}/{len(queue)} analysed · {len(failed)} failed")
+            print(f"{done}/{len(queue)} analysed · {len(failed)} failed · {len(skipped)} without preview")
         wall = time.time() - started
     per_song = gpu_s / max(done, 1)
     print(
@@ -266,11 +301,13 @@ def previews(n: int = 200, batch: int = 10) -> None:
             {
                 "analysed": done,
                 "failed": len(failed),
+                "no_preview": len(skipped),
                 "wall_minutes": round(wall / 60, 1),
                 "gpu_seconds_per_song": round(per_song, 1),
                 "est_cost_usd_this_run": round(gpu_s / 3600 * L4_PER_HOUR, 2),
                 "est_cost_usd_per_1000": round(per_song * 1000 / 3600 * L4_PER_HOUR, 2),
                 "sample_failures": failed[:5],
+                "sample_no_preview": skipped[:5],
             },
             indent=2,
         )
