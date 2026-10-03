@@ -88,13 +88,16 @@ def test_viterbi_is_optimal_on_unconstrained_tiny_problem():
     w = pf.w
     from griot_core.pathfinder import slerp
 
+    def seam(f, t):
+        c = transition_cost(cat, [f], [t], w)[0, 0]
+        return c + w["rough"] * c * c
+
     best = np.inf
     for x in range(2, 40):
         for y in range(2, 40):
             if x == y:
                 continue
-            c = transition_cost(cat, [a], [x], w)[0, 0] + transition_cost(cat, [x], [y], w)[0, 0]
-            c += transition_cost(cat, [y], [b], w)[0, 0]
+            c = seam(a, x) + seam(x, y) + seam(y, b)
             for i, z in enumerate((x, y)):
                 t = slerp(cat.full[a], cat.full[b], (i + 1) / 3)
                 c += w["progress"] * cat.full_dist(cat.full[z] @ t)
@@ -133,3 +136,16 @@ def test_same_recording_under_another_id_is_never_repeated():
     leg = Pathfinder(cat, max_per_artist=99).bridge([0, 1], [6])
     keys = [cat.rec_key[i] for i in leg.path]
     assert len(keys) == len(set(keys))
+
+
+def test_convex_seams_avoid_one_jarring_transition():
+    cat = Catalog(make_tracks(n=800, seed=21))
+    a, b = far_pair(cat)
+    w = merged_weights(None)
+
+    def worst(path):
+        return max(transition_cost(cat, [x], [y], w)[0, 0] for x, y in zip(path, path[1:]))
+
+    linear = Pathfinder(cat, weights={"rough": 0.0}).bridge([a, b], [6]).path
+    convex = Pathfinder(cat).bridge([a, b], [6]).path
+    assert worst(convex) <= worst(linear) + 1e-9

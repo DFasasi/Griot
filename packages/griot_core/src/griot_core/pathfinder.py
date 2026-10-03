@@ -137,10 +137,15 @@ class Pathfinder:
         sims = self.cat.full[idx] @ aim
         return idx[np.argpartition(-sims, self.k)[: self.k]]
 
+    def _seam(self, f, t) -> np.ndarray:
+        """Transition cost as the search sees it: convex, so rough seams are avoided first."""
+        c = transition_cost(self.cat, f, t, self.w)
+        return c + self.w["rough"] * c * c
+
     def _gap(self, s, e, n, positions, allowed, used, artists, arc, steer):
         cat, w = self.cat, self.w
         if n == 0:
-            return [], float(transition_cost(cat, [s], [e], w)[0, 0])
+            return [], float(self._seam([s], [e])[0, 0])
 
         layers, pcosts = [], []
         for i in range(n):
@@ -164,12 +169,12 @@ class Pathfinder:
             return artists[ak] + sum(cat.artist_key[p] == ak for p in path) < self.max_per_artist
 
         # paths[node_pos] -> list of (cost, path tuple); layer 0 seeded from S
-        c0 = transition_cost(cat, [s], layers[0], w)[0] + pcosts[0]
+        c0 = self._seam([s], layers[0])[0] + pcosts[0]
         paths = [[(float(c0[j]), (int(x),))] if ok((), int(x)) else [] for j, x in enumerate(layers[0])]
 
         for i in range(1, n):
             prev, cur = layers[i - 1], layers[i]
-            C = transition_cost(cat, prev, cur, w)  # (len prev, len cur)
+            C = self._seam(prev, cur)  # (len prev, len cur)
             owner = np.array([p for p, plist in enumerate(paths) for _ in plist])
             flat = [pp for plist in paths for pp in plist]
             if not flat:
@@ -189,7 +194,7 @@ class Pathfinder:
             paths = new_paths
 
         last = layers[-1]
-        Ce = transition_cost(cat, last, [e], w)[:, 0]
+        Ce = self._seam(last, [e])[:, 0]
         best = min(
             ((c + float(Ce[j]), p) for j, plist in enumerate(paths) for c, p in plist),
             default=None,

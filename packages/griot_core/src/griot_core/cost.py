@@ -24,6 +24,9 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "progress": 1.0,
     "arc": 0.6,
     "steer": 0.3,
+    # path shape: a seam's cost counts as c + rough * c², so one jarring transition costs more
+    # than two moderate ones (listeners notice the worst seam, not the average)
+    "rough": 1.0,
 }
 
 LYRICS_NEUTRAL = 0.35  # used when either side has no lyrics, so instrumentals aren't favored
