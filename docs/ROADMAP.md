@@ -29,23 +29,25 @@ Their recommenders mostly use collaborative filtering and optimize for engagemen
 | Analyzer (local, full songs) + desktop agent | Done, verified on real audio |
 | Enrichment (Deezer, ListenBrainz, Last.fm, MusicBrainz, LRCLIB, themes) | Done, verified live |
 | Library import: Spotify (PKCE), YouTube (many links), files; cross-platform matching | Done; remix/live versions never substituted for originals |
-| Import queue + preview analysis on Modal (tier B) | Done; ~8 GPU-s and ~$1.8 per 1,000 songs |
+| Import queue + preview analysis on Modal (tier B) | Done; 5,853 songs analysed for ~$11 (~$1.9 per 1,000) |
 | Library sync across browsers/desktop (private code) | Done; accounts come with hosting |
 | Bridge engine, evaluation harness, baselines | Done; first real-catalog results below |
 | Web app (Studio, Library, interactive How it works), desktop shell | Done; redesigned ("heritage × night studio") |
 | Spotify/Apple export, arc drawing UI, render-mix, hosting + accounts | Next |
 
-### First results on a real library (2,347 preview-analysed songs, 60 pairs, 8-song bridges)
+### Results on a real library (5,853 preview-analysed songs, 100 random pairs, 8-song bridges)
 
-| method | seam sim ↑ | tempo jump ↓ | key clashes ↓ | energy jump ↓ | artist repeats ↓ |
-|---|---|---|---|---|---|
-| Griot | 0.870 | 2.4 % | 3 % | 0.043 | 0 % |
-| Straight line (similar songs only) | 0.871 | 11.2 % | 61 % | 0.101 | 2.5 % |
-| Artist graph (Boil the Frog) | 0.784 | 11.0 % | 61 % | 0.072 | 9.5 % |
-| Random | 0.346 | 17.6 % | 67 % | 0.155 | 0.7 % |
+| method | seam sim ↑ | worst seam ↑ | tempo jump ↓ | key clashes ↓ | energy jump ↓ | progress ↑ | artist repeats ↓ |
+|---|---|---|---|---|---|---|---|
+| Griot | 0.865 | **0.713** | **2.3 %** | **3 %** | **0.035** | 0.916 | **0 %** |
+| Straight line (similar songs only) | 0.875 | 0.692 | 6.1 % | 63 % | 0.089 | 0.952 | 6.7 % |
+| Artist graph (Boil the Frog) | 0.754 | 0.501 | 12.1 % | 61 % | 0.060 | 0.728 | 9.5 % |
+| Random | 0.361 | 0.082 | 18.9 % | 68 % | 0.135 | 0.346 | 0.1 % |
 
-Caveats: these tracks are preview-analysed, so the full-song vs preview ablation needs full-file
-analyses to be meaningful; early preview runs had unreliable tempos (fixed, see `fix-tempo`).
+Measured after the tempo repair (72 % of early preview tempos were wrong) and with convex seam
+costs. Example: Eyedress → Asake went from avg seam 0.79 / worst 1.18 to 0.36 / 0.73.
+Caveat: nearly all tracks are preview-analysed, so the full-song vs preview ablation still needs
+full-file analyses (desktop app) to say anything.
 
 Deviations from the plan: plain SQL migration instead of alembic (one schema file so far);
 `all-in-one-mlx` / `all-in-one-infer` instead of upstream `allin1` (broken with current NATTEN);
