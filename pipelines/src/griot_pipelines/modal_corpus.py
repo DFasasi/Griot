@@ -188,7 +188,9 @@ class Analyzer:
                 struct = structs.get(p) or analyze_structure([p], work)[p]
                 desc = analyze_descriptors(p)
                 centres, embs = window_embeddings(p, self.models)
-                feats = build_features(p, struct, desc, centres, embs, zero_shot(embs, self.models))
+                feats = build_features(
+                    p, struct, desc, centres, embs, zero_shot(embs, self.models), bpm_hint=q.get("deezer_bpm")
+                )
                 feats["analyzer"].full_audio = False
                 feats["duration_s"] = q.get("duration_s") or feats["duration_s"]
                 doc = TrackFeatures(
@@ -263,8 +265,8 @@ def _download_preview(q: dict) -> bytes:
     return httpx.get(url, timeout=60, follow_redirects=True).raise_for_status().content
 
 
-def _fresh_preview(deezer, deezer_id: str) -> tuple[str | None, str]:
-    """-> (url, "") or (None, reason). Deezer answers rate limits with HTTP 200 + error code 4."""
+def _fresh_preview(deezer, deezer_id: str) -> tuple[str | None, str | float]:
+    """-> (url, deezer_bpm) or (None, reason). Deezer answers rate limits with HTTP 200 + code 4."""
     import random
     import time
 
@@ -281,7 +283,7 @@ def _fresh_preview(deezer, deezer_id: str) -> tuple[str | None, str]:
             continue
         if err or not t:
             return None, "track not on Deezer any more"
-        return (t["preview"], "") if t.get("preview") else (None, "Deezer has no preview")
+        return (t["preview"], t.get("bpm") or 0.0) if t.get("preview") else (None, "Deezer has no preview")
     return None, "Deezer rate limit"
 
 
@@ -346,11 +348,11 @@ def previews(n: int = 200, batch: int = 10) -> None:
             # download audio and never hit Deezer's API (which throttles parallel callers).
             ready = []
             for q in queue:
-                url, why = _fresh_preview(deezer, q["deezer_id"])
+                url, extra = _fresh_preview(deezer, q["deezer_id"])
                 if url:
-                    ready.append(q | {"preview_url": url})
+                    ready.append(q | {"preview_url": url, "deezer_bpm": extra})
                 else:
-                    reasons[why] += 1
+                    reasons[extra] += 1
             print(
                 f"pass: {len(queue)} songs, {len(ready)} with fresh previews (attempted {len(attempted)}/{n})"
             )

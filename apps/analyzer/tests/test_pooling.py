@@ -36,3 +36,14 @@ def test_pool_embeddings_separates_intro_and_outro():
     assert np.argmax(p["intro"]) == 0 and np.argmax(p["outro"]) == 1
     assert p["chorus"] is None
     assert np.isclose(np.linalg.norm(p["full"]), 1)
+
+
+def test_reconcile_bpm_prefers_agreement_over_the_structure_model():
+    from griot_analyzer.extract import reconcile_bpm
+
+    assert reconcile_bpm(125.0, 89.0, hint=88.7) == 89.0  # No Diggity: structure wrong on a clip
+    assert reconcile_bpm(127.7, 72.0, hint=144.1) == 144.0  # Money Trees: half-time estimate, doubled
+    assert reconcile_bpm(115.0, 124.0, hint=124.9) == 124.0
+    assert reconcile_bpm(125.0, 89.0) == 89.0  # no hint, disagreement -> Essentia
+    assert reconcile_bpm(120.0, 60.5) == 120.0  # octave agreement -> structure
+    assert reconcile_bpm(100.0, 70.0, hint=133.0) == 133.0  # nothing agrees -> trust the hint

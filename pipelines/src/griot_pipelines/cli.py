@@ -64,10 +64,6 @@ def db(
     console.print(f"updated {len(tracks)} recordings")
 
 
-if __name__ == "__main__":
-    app()
-
-
 @app.command()
 def previews(
     api: str = typer.Option(os.environ.get("GRIOT_API_URL", "http://localhost:8000")),
@@ -127,3 +123,60 @@ def previews(
             finally:
                 path.unlink(missing_ok=True)
     console.print(f"{done}/{len(todo)} previews analysed")
+
+
+@app.command("fix-tempo")
+def fix_tempo(
+    dsn: str = typer.Option(os.environ.get("DATABASE_URL", ""), help="Postgres DSN (to read the catalog)"),
+    api: str = typer.Option(os.environ.get("GRIOT_API_URL", "http://127.0.0.1:8000")),
+    token: str = typer.Option(os.environ.get("GRIOT_SUBMIT_TOKEN", ""), help="Submit token for the API"),
+    dry_run: bool = typer.Option(False, help="Report what would change without writing"),
+) -> None:
+    """Correct preview-analysed tempos using Deezer's published BPM.
+
+    Early preview runs trusted the structure model's tempo, which is unreliable on 30 s clips.
+    Each correction is resubmitted through the API so the merged catalog stays consistent.
+    """
+    import httpx
+
+    from griot_analyzer.extract import reconcile_bpm
+    from griot_api.repo import PgRepo
+    from griot_pipelines.sources import Deezer
+
+    repo, dz = PgRepo(dsn), Deezer()
+    tracks = [t for t in repo.all_tracks() if t.tier == "B" and t.external_ids.get("deezer")]
+    fixed, unchanged, no_bpm = [], 0, 0
+    with Progress(console=console) as prog:
+        task = prog.add_task("checking tempos", total=len(tracks))
+        for t in tracks:
+            prog.advance(task)
+            try:
+                d = dz._get(f"/track/{t.external_ids['deezer']}") or {}
+            except Exception:
+                continue
+            hint = d.get("bpm") or 0
+            if not hint:
+                no_bpm += 1
+                continue
+            new = round(reconcile_bpm(t.global_.bpm, t.global_.bpm, hint), 2)
+            if abs(new - t.global_.bpm) / t.global_.bpm > 0.04:
+                t.global_.bpm = new
+                fixed.append(t)
+            else:
+                unchanged += 1
+    console.print(
+        f"{len(fixed)} tempos corrected · {unchanged} already right · {no_bpm} without a Deezer BPM"
+    )
+    for t in fixed[:8]:
+        console.print(f"  {t.artist} — {t.title}: now {t.global_.bpm:.0f} BPM")
+    if dry_run or not fixed:
+        return
+    with httpx.Client(base_url=api, headers={"Authorization": f"Bearer {token}"}, timeout=300) as c:
+        for i in range(0, len(fixed), 25):
+            docs = [t.model_dump(mode="json", by_alias=True) for t in fixed[i : i + 25]]
+            c.post("/submissions", json=docs).raise_for_status()
+    console.print(f"resubmitted {len(fixed)} corrected tracks")
+
+
+if __name__ == "__main__":
+    app()

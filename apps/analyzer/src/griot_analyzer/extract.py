@@ -320,14 +320,41 @@ def zero_shot(embs: np.ndarray, models: Models) -> dict:
 # --------------------------------------------------------------------------- assembly
 
 
-def reconcile_bpm(structure_bpm: float | None, essentia_bpm: float) -> float:
-    """Prefer the beat-tracker tempo; Essentia often lands on the double/half octave."""
-    if not structure_bpm:
-        return essentia_bpm
-    return float(structure_bpm)
+TEMPO_AGREE = 0.04  # two estimates within 4 % count as the same tempo
 
 
-def build_features(path: Path, struct: dict, desc: dict, centres, embs, zs: dict) -> dict:
+def _rel(a: float, b: float) -> float:
+    return abs(a - b) / max(b, 1e-9)
+
+
+def reconcile_bpm(structure_bpm: float | None, essentia_bpm: float, hint: float | None = None) -> float:
+    """Pick a tempo by agreement rather than trusting one estimator.
+
+    The structure model's tempo is excellent on full songs but unreliable on 30 s clips (it
+    put "No Diggity" at 125 BPM; Essentia and Deezer both say 89). So:
+      1. with an external hint (e.g. Deezer's published BPM), take the estimate that agrees
+         with it — after octave folding — else the hint itself;
+      2. without a hint, keep the structure tempo only when Essentia agrees with it
+         (octave-folded); otherwise Essentia, which is steadier on short audio.
+    """
+    cands = [b for b in (structure_bpm, essentia_bpm) if b and b > 0]
+    if hint and hint > 0:
+        for b in cands:
+            for f in (1.0, 2.0, 0.5):
+                if _rel(b * f, hint) <= TEMPO_AGREE:
+                    return float(b * f)
+        return float(hint)
+    if structure_bpm and essentia_bpm:
+        for f in (1.0, 2.0, 0.5):
+            if _rel(essentia_bpm * f, structure_bpm) <= TEMPO_AGREE:
+                return float(structure_bpm)
+        return float(essentia_bpm)
+    return float(cands[0]) if cands else 120.0
+
+
+def build_features(
+    path: Path, struct: dict, desc: dict, centres, embs, zs: dict, bpm_hint: float | None = None
+) -> dict:
     """Combine stage outputs into the feature part of a TrackFeatures document."""
     duration = desc["duration"]
     pooled = pool_embeddings(centres, embs, struct["segments"], duration)
@@ -335,7 +362,7 @@ def build_features(path: Path, struct: dict, desc: dict, centres, embs, zs: dict
     grid = np.arange(n) * HOP_S + HOP_S / 2
     val_traj = np.interp(grid, centres, zs["valence_windows"])
     aro_traj = np.interp(grid, centres, zs["arousal_windows"])
-    bpm = reconcile_bpm(struct.get("bpm"), desc["bpm"])
+    bpm = reconcile_bpm(struct.get("bpm"), desc["bpm"], bpm_hint)
 
     return {
         "duration_s": round(duration, 2),
