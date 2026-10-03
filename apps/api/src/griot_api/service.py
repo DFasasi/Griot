@@ -47,6 +47,7 @@ class BridgeService:
         self._cat: Catalog | None = None
         self._cat_built = 0.0
         self._stale = False
+        self._rebuilding = False
         self._rows: dict[str, dict] | None = None  # light identity rows by id
         self._idx: dict[str, dict] = {}
         self._spaces: Counter = Counter()
@@ -118,17 +119,37 @@ class BridgeService:
 
     @property
     def catalog(self) -> Catalog:
-        """Full features for pathfinding. Rebuilt lazily — at most every 30 s while songs are
-        streaming in — instead of on every submission."""
+        """Full features for pathfinding. Built synchronously only the first time; after new
+        songs arrive it is refreshed in the background (at most every 30 s) while bridges keep
+        using the current one — so ingestion never stalls a bridge request."""
         with self._lock:
-            due = self._stale and time.time() - self._cat_built >= self.CATALOG_REFRESH_S
-            if self._cat is None or due:
-                tracks = self.repo.all_tracks()
-                if len(tracks) < 3:
-                    raise BridgeError("catalog has fewer than 3 tracks")
-                self._cat = Catalog(tracks)
+            if self._cat is None:
+                self._cat = self._build_catalog()
                 self._cat_built, self._stale = time.time(), False
+            elif (
+                self._stale
+                and not self._rebuilding
+                and time.time() - self._cat_built >= self.CATALOG_REFRESH_S
+            ):
+                self._rebuilding = True
+                threading.Thread(target=self._rebuild_in_background, daemon=True).start()
             return self._cat
+
+    def _build_catalog(self) -> Catalog:
+        tracks = self.repo.all_tracks()
+        if len(tracks) < 3:
+            raise BridgeError("catalog has fewer than 3 tracks")
+        return Catalog(tracks)
+
+    def _rebuild_in_background(self) -> None:
+        try:
+            fresh = self._build_catalog()
+            with self._lock:
+                self._cat, self._cat_built, self._stale = fresh, time.time(), False
+        except Exception:
+            pass  # keep serving the previous catalog; the next request retries
+        finally:
+            self._rebuilding = False
 
     def invalidate(self) -> None:
         with self._lock:

@@ -106,3 +106,11 @@ export async function youtubeIds(): Promise<Record<string, string>> {
     if (e.track_id && e.item.source === "youtube" && e.item.source_id) out[e.track_id] = e.item.source_id;
   return out;
 }
+
+/** track_id -> Spotify track id, for songs imported from Spotify (exact export matches). */
+export async function spotifyIds(): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const e of await loadLibrary())
+    if (e.track_id && e.item.source === "spotify" && e.item.source_id) out[e.track_id] = e.item.source_id;
+  return out;
+}

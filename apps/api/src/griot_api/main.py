@@ -7,6 +7,8 @@ Backend selection (env):
 """
 
 import os
+import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -44,7 +46,24 @@ def make_text_embedder():
 
 
 def create_app(service: BridgeService | None = None) -> FastAPI:
-    app = FastAPI(title="Griot", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        """Load the identity index and feature catalog in the background at boot, so the first
+        search or bridge doesn't wait for them."""
+        if os.environ.get("GRIOT_WARM", "1") == "1":
+
+            def go() -> None:
+                try:
+                    s = svc()
+                    s.track_count()
+                    _ = s.catalog
+                except Exception:
+                    pass  # e.g. an empty catalog; requests will report it
+
+            threading.Thread(target=go, daemon=True).start()
+        yield
+
+    app = FastAPI(title="Griot", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=os.environ.get("GRIOT_CORS", "http://localhost:3000").split(","),
@@ -59,6 +78,7 @@ def create_app(service: BridgeService | None = None) -> FastAPI:
         return app.state.service
 
     Svc = Annotated[BridgeService, Depends(svc)]
+
     # Comma-separated submit tokens. There is deliberately no default: an unconfigured
     # server accepts no submissions rather than a guessable built-in token.
     tokens = {t.strip() for t in os.environ.get("GRIOT_SUBMIT_TOKENS", "").split(",") if t.strip()}

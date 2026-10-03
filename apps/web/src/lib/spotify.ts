@@ -7,7 +7,9 @@ import type { ImportItem } from "./api";
 // Since Feb 2026, dev-mode track objects carry no ISRC — the resolver matches by
 // title/artist/duration instead.
 
-const SCOPES = "user-library-read playlist-read-private playlist-read-collaborative";
+// Read your library; create playlists for exported bridges (private by default).
+const SCOPES = "user-library-read playlist-read-private playlist-read-collaborative playlist-modify-private playlist-modify-public";
+const SCOPE_KEY = "griot.spotify.scopes";
 const AUTH = "https://accounts.spotify.com/authorize";
 const TOKEN = "https://accounts.spotify.com/api/token";
 const API = "https://api.spotify.com/v1";
@@ -65,11 +67,23 @@ export async function finishSpotifyLogin(): Promise<boolean> {
   if (!r.ok) throw new Error(`Spotify token exchange failed (${r.status})`);
   const t = await r.json();
   saveToken({ ...t, expires_at: Date.now() + t.expires_in * 1000, client_id: clientId });
+  try {
+    localStorage.setItem(SCOPE_KEY, t.scope ?? "");
+  } catch {}
   return true;
 }
 
 function saveToken(t: Token) {
   localStorage.setItem(KEY, JSON.stringify(t));
+}
+
+/** True when the stored sign-in predates playlist export and needs one reconnect. */
+export function spotifyNeedsReconnectForExport() {
+  try {
+    return !(localStorage.getItem(SCOPE_KEY) ?? "").includes("playlist-modify-private");
+  } catch {
+    return true;
+  }
 }
 
 export function spotifyConnected() {
@@ -97,6 +111,17 @@ async function token(): Promise<string> {
   const n = await r.json();
   saveToken({ ...t, ...n, expires_at: Date.now() + n.expires_in * 1000 });
   return n.access_token;
+}
+
+async function send(method: string, url: string, body: unknown) {
+  const r = await fetch(`${API}${url}`, {
+    method,
+    headers: { Authorization: `Bearer ${await token()}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (r.status === 403 || r.status === 401) throw new Error("Spotify needs permission to create playlists — reconnect Spotify");
+  if (!r.ok) throw new Error(`Spotify ${r.status} on ${url}`);
+  return r.json();
 }
 
 async function get(url: string) {
@@ -165,3 +190,47 @@ export const spotify = {
   playlistItems: (id: string, onProgress?: (n: number) => void) =>
     pages(`/playlists/${id}/items?limit=50`, (el) => ((el.item ?? el.track) as SpTrack) ?? null, onProgress),
 };
+
+// ------------------------------------------------------------------ export a bridge
+
+const clean = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/\s*[([].*?[)\]]/g, "")
+    .replace(/\s+-\s+.*$/, "")
+    .replace(/\b(feat\.?|ft\.?|featuring)\b.*$/, "")
+    .replace(/[^\p{L}\p{N} ]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+const VERSION = /\b(remix|live|acoustic|sped ?up|slowed|instrumental|karaoke|cover)\b/i;
+
+/** Find the Spotify track for a title/artist, refusing remixes/live cuts the title didn't ask for. */
+async function findOnSpotify(title: string, artist: string): Promise<string | null> {
+  const q = `track:${clean(title)} artist:${clean(artist.split(/,|&| x /)[0])}`;
+  const res = await get(`/search?type=track&limit=10&q=${encodeURIComponent(q)}`);
+  const items: SpTrack[] = res.tracks?.items ?? [];
+  const want = clean(title);
+  const wantsVersion = VERSION.test(title);
+  const hit = items.find(
+    (t) =>
+      clean(t.name) === want &&
+      t.artists.some((a) => clean(artist).includes(clean(a.name)) || clean(a.name).includes(clean(artist))) &&
+      (wantsVersion || !VERSION.test(t.name)),
+  );
+  return hit?.id ?? null;
+}
+
+export type ExportTrack = { title: string; artist: string; spotifyId?: string | null };
+
+export async function exportToSpotify(name: string, description: string, tracks: ExportTrack[]) {
+  const uris: string[] = [];
+  const missing: string[] = [];
+  for (const t of tracks) {
+    const id = t.spotifyId ?? (await findOnSpotify(t.title, t.artist).catch(() => null));
+    if (id) uris.push(`spotify:track:${id}`);
+    else missing.push(`${t.artist} — ${t.title}`);
+  }
+  const pl = await send("POST", "/me/playlists", { name, description: description.slice(0, 290), public: false });
+  for (let i = 0; i < uris.length; i += 100) await send("POST", `/playlists/${pl.id}/items`, { uris: uris.slice(i, i + 100) });
+  return { url: pl.external_urls?.spotify ?? `https://open.spotify.com/playlist/${pl.id}`, added: uris.length, missing };
+}

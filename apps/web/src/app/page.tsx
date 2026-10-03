@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { CamelotWheel } from "@/components/CamelotWheel";
 import { TrajectoryChart } from "@/components/TrajectoryChart";
 import { TransitionBars } from "@/components/TransitionBars";
+import { SpotifyExport } from "@/components/SpotifyExport";
 import { WaypointPicker } from "@/components/WaypointPicker";
 import { api, type ArcPoint, type Bridge, type TrackDetail, type TrackHit } from "@/lib/api";
 import { takeQueuedWaypoints, youtubeIds } from "@/lib/library";
@@ -292,6 +293,7 @@ export default function Studio() {
                 )}
                 <div className="mt-3 flex gap-4 text-xs">
                   <a href={api.m3uUrl(bridge.id)} className="text-accent hover:underline">Export M3U</a>
+                  <SpotifyExport bridge={bridge} />
                 </div>
               </Panel>
 
