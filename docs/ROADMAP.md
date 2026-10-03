@@ -21,26 +21,31 @@ AcousticBrainz is **evidence for this plan**: it did exactly this, with users ru
 ### Where Griot beats Spotify/Apple
 Their recommenders mostly use collaborative filtering and optimize for engagement and familiarity. They don't handle intent ("get me from A to B"), they don't consider transitions (outro→intro), they don't use song structure, they don't offer a controllable energy/mood arc, and they don't consider lyrical narrative. Spotify also removed `audio-features`, `audio-analysis`, `recommendations`, and `related-artists` for new apps (Nov 2024), so these features can't be rebuilt on its API.
 
-## Status (2026-10-02, updated)
+## Status (2026-10-02)
 
 | Milestone | State |
 |---|---|
-| M0 scaffold, contracts, CI | Done |
-| Model spike | Done — see [spike-results.md](spike-results.md) |
-| Analyzer v1 (scan/analyze/export/submit/local bridge) | Done, verified on real audio |
-| Enrichment (Deezer, ListenBrainz, Last.fm, MusicBrainz, LRCLIB, themes) | Done, verified live; Last.fm + themes need keys |
-| Modal corpus backfill | Written and import-validated; needs a Modal account + Jamendo key to run |
-| Bridge engine + eval harness + baselines | Done; synthetic sanity run in `eval/results-synthetic.md` |
-| API (memory + Postgres) | Done, Postgres path tested against pg17 + pgvector |
-| Web app | Done, rendered and checked in headless Chrome (light + dark) |
-| Library import + cross-platform mapping (Spotify PKCE, YouTube playlists, files) | Done; resolver verified live on Deezer; Spotify/YouTube need client id / API key to try end to end |
-| Coverage + wanted queue + preview fallback (tier B) | Done, verified live (missing → preview → upgraded by full analysis) |
-| File quality checks (bitrate, spectral cutoff) | Done; a 96 kbps re-encode is flagged |
-| Desktop app (Tauri shell + loopback agent) | Done in dev; installer packaging (frozen agent sidecar) next |
-| Interactive About page | Done |
-| YouTube full-length playback (embed) | Done for YouTube-imported songs |
-| Spotify/Apple export, arc drawing UI, render-mix | Next |
-| Real-catalog eval + listening test + deploy | Next (needs the corpus/library runs) |
+| Scaffold, contracts, CI (Python, web, desktop) | Done |
+| Analyzer (local, full songs) + desktop agent | Done, verified on real audio |
+| Enrichment (Deezer, ListenBrainz, Last.fm, MusicBrainz, LRCLIB, themes) | Done, verified live |
+| Library import: Spotify (PKCE), YouTube (many links), files; cross-platform matching | Done; remix/live versions never substituted for originals |
+| Import queue + preview analysis on Modal (tier B) | Done; ~8 GPU-s and ~$1.8 per 1,000 songs |
+| Library sync across browsers/desktop (private code) | Done; accounts come with hosting |
+| Bridge engine, evaluation harness, baselines | Done; first real-catalog results below |
+| Web app (Studio, Library, interactive How it works), desktop shell | Done; redesigned ("heritage × night studio") |
+| Spotify/Apple export, arc drawing UI, render-mix, hosting + accounts | Next |
+
+### First results on a real library (2,347 preview-analysed songs, 60 pairs, 8-song bridges)
+
+| method | seam sim ↑ | tempo jump ↓ | key clashes ↓ | energy jump ↓ | artist repeats ↓ |
+|---|---|---|---|---|---|
+| Griot | 0.870 | 2.4 % | 3 % | 0.043 | 0 % |
+| Straight line (similar songs only) | 0.871 | 11.2 % | 61 % | 0.101 | 2.5 % |
+| Artist graph (Boil the Frog) | 0.784 | 11.0 % | 61 % | 0.072 | 9.5 % |
+| Random | 0.346 | 17.6 % | 67 % | 0.155 | 0.7 % |
+
+Caveats: these tracks are preview-analysed, so the full-song vs preview ablation needs full-file
+analyses to be meaningful; early preview runs had unreliable tempos (fixed, see `fix-tempo`).
 
 Deviations from the plan: plain SQL migration instead of alembic (one schema file so far);
 `all-in-one-mlx` / `all-in-one-infer` instead of upstream `allin1` (broken with current NATTEN);

@@ -67,8 +67,13 @@ from this repo; packaging needs the agent frozen into a bundled sidecar (`GRIOT_
   from YouTube play in full through YouTube's embedded player. Griot never downloads audio.
 - **Files:** analysed locally by the desktop app; only features are shared. Low-bitrate or
   re-encoded files are flagged, and merges prefer clean sources.
-- Songs nobody has analysed are queued; `uv run griot-enrich previews` fills them from 30 s
-  Deezer previews (marked preview-only) until a full-song analysis replaces them.
+- Songs nobody has analysed are queued. Fill the queue from 30 s Deezer previews (marked
+  preview-only until a full-song analysis replaces them):
+  - on Modal GPUs (fast, ~$1.8 per 1,000 songs):
+    `uv run modal run pipelines/src/griot_pipelines/modal_corpus.py::previews --n 1000 --batch 25`
+  - or locally: `uv run griot-enrich previews`
+- **Sync:** Library → "Turn on sync" gives a private code; enter it in another browser or the
+  desktop app to share one library. Only a hash of the code is stored.
 
 Run the dev web app on `127.0.0.1` (not `localhost`) so Spotify's loopback redirect matches.
 
