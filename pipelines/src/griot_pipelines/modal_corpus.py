@@ -1,4 +1,7 @@
-"""Backfill the open, full-length corpus on Modal GPUs (tier "A-open").
+"""Analyse audio on Modal GPUs.
+
+`main`     — backfill the open, full-length corpus (tier "A-open") from Jamendo.
+`previews` — work through the import queue using 30 s Deezer previews (tier "B").
 
 Source: Jamendo — Creative Commons tracks with `audiodownload_allowed`, ordered by
 popularity. Audio is downloaded inside the container, analyzed with the exact same
@@ -6,6 +9,7 @@ popularity. Audio is downloaded inside the container, analyzed with the exact sa
 
     modal secret create jamendo JAMENDO_CLIENT_ID=<id>      # free key: devportal.jamendo.com
     modal run pipelines/src/griot_pipelines/modal_corpus.py --n 5000 --out data/corpus/jamendo.jsonl
+    modal run pipelines/src/griot_pipelines/modal_corpus.py::previews --n 200
 """
 
 from __future__ import annotations
@@ -146,6 +150,67 @@ class Analyzer:
         hf_cache.commit()
         return docs
 
+    @modal.method()
+    def analyze_previews(self, batch: list[dict]) -> dict:
+        """Queue items (title, artist, isrc, deezer_id, preview_url) -> tier-B TrackFeatures."""
+        import tempfile
+        import time
+
+        import httpx
+
+        from griot_analyzer.extract import (
+            analyze_descriptors,
+            analyze_structure,
+            build_features,
+            window_embeddings,
+            zero_shot,
+        )
+        from griot_core.schema import TrackFeatures
+
+        started = time.time()
+        work = Path(tempfile.mkdtemp())
+        paths, meta = [], {}
+        for q in batch:
+            p = work / f"{q['key'].replace(':', '_')}.mp3"
+            try:
+                p.write_bytes(
+                    httpx.get(q["preview_url"], timeout=60, follow_redirects=True).raise_for_status().content
+                )
+                paths.append(p)
+                meta[p] = q
+            except httpx.HTTPError:
+                continue  # previews expire; skipped songs stay queued
+        try:
+            structs = analyze_structure(paths, work)
+        except Exception:
+            structs = {}
+        docs, failed = [], []
+        for p in paths:
+            q = meta[p]
+            try:
+                struct = structs.get(p) or analyze_structure([p], work)[p]
+                desc = analyze_descriptors(p)
+                centres, embs = window_embeddings(p, self.models)
+                feats = build_features(p, struct, desc, centres, embs, zero_shot(embs, self.models))
+                feats["analyzer"].full_audio = False
+                feats["duration_s"] = q.get("duration_s") or feats["duration_s"]
+                doc = TrackFeatures(
+                    id=f"isrc:{q['isrc']}" if q.get("isrc") else f"deezer:{q['deezer_id']}",
+                    isrc=q.get("isrc"),
+                    title=q["title"],
+                    artist=q["artist"],
+                    tier="B",
+                    external_ids={"deezer": str(q["deezer_id"]), "deezer_preview": q["preview_url"]},
+                    **feats,
+                )
+                docs.append(doc.model_dump(mode="json", by_alias=True))
+            except Exception as e:
+                failed.append(f"{q['artist']} — {q['title']}: {e}")
+            finally:
+                p.unlink(missing_ok=True)
+        hf_cache.commit()
+        return {"docs": docs, "failed": failed, "seconds": time.time() - started, "asked": len(batch)}
+
 
 @app.local_entrypoint()
 def main(n: int = 1000, batch: int = 16, out: str = "data/corpus/jamendo.jsonl") -> None:
@@ -162,3 +227,51 @@ def main(n: int = 1000, batch: int = 16, out: str = "data/corpus/jamendo.jsonl")
             done += len(docs)
             print(f"{done}/{len(tracks)} analyzed")
     print(json.dumps({"written": done, "out": str(dst)}))
+
+
+L4_PER_HOUR = 0.80  # USD, Modal list price; container time also includes model loading
+
+
+@app.local_entrypoint()
+def previews(n: int = 200, batch: int = 10) -> None:
+    """Read the local API's queue, analyse previews on Modal, submit results back locally."""
+    import os
+    import time
+
+    import httpx
+
+    from griot_core.env import load_dotenv
+
+    load_dotenv()
+    api = os.environ.get("GRIOT_API_URL", "http://127.0.0.1:8000")
+    headers = {"Authorization": f"Bearer {os.environ.get('GRIOT_SUBMIT_TOKEN', '')}"}
+    with httpx.Client(base_url=api, headers=headers, timeout=120) as c:
+        queue = [
+            q for q in c.get("/wanted", params={"limit": n}).raise_for_status().json() if q.get("preview_url")
+        ]
+        print(f"{len(queue)} queued songs with previews")
+        batches = [queue[i : i + batch] for i in range(0, len(queue), batch)]
+        started, gpu_s, done, failed = time.time(), 0.0, 0, []
+        for res in Analyzer().analyze_previews.map(batches, order_outputs=False):
+            gpu_s += res["seconds"]
+            failed += res["failed"]
+            if res["docs"]:
+                c.post("/submissions", json=res["docs"]).raise_for_status()
+                done += len(res["docs"])
+            print(f"{done}/{len(queue)} analysed · {len(failed)} failed")
+        wall = time.time() - started
+    per_song = gpu_s / max(done, 1)
+    print(
+        json.dumps(
+            {
+                "analysed": done,
+                "failed": len(failed),
+                "wall_minutes": round(wall / 60, 1),
+                "gpu_seconds_per_song": round(per_song, 1),
+                "est_cost_usd_this_run": round(gpu_s / 3600 * L4_PER_HOUR, 2),
+                "est_cost_usd_per_1000": round(per_song * 1000 / 3600 * L4_PER_HOUR, 2),
+                "sample_failures": failed[:5],
+            },
+            indent=2,
+        )
+    )

@@ -21,6 +21,9 @@ class Repo(Protocol):
     def want(self, items: list[dict]) -> None: ...
     def wanted(self, limit: int) -> list[dict]: ...
     def unwant(self, keys: list[str]) -> None: ...
+    def library_create(self, lib_id: str) -> None: ...
+    def library_get(self, lib_id: str) -> dict[str, dict] | None: ...
+    def library_put(self, lib_id: str, entries: dict[str, dict]) -> None: ...
 
 
 class MemoryRepo:
@@ -30,6 +33,7 @@ class MemoryRepo:
         self.bridges: dict[str, dict] = {}
         self.ratings: list[tuple[str, int, int]] = []
         self._wanted: dict[str, dict] = {}
+        self._libraries: dict[str, dict[str, dict]] = {}
 
     @classmethod
     def from_jsonl(cls, path: Path) -> MemoryRepo:
@@ -71,6 +75,15 @@ class MemoryRepo:
     def unwant(self, keys: list[str]) -> None:
         for k in keys:
             self._wanted.pop(k, None)
+
+    def library_create(self, lib_id: str) -> None:
+        self._libraries.setdefault(lib_id, {})
+
+    def library_get(self, lib_id: str) -> dict[str, dict] | None:
+        return self._libraries.get(lib_id)
+
+    def library_put(self, lib_id: str, entries: dict[str, dict]) -> None:
+        self._libraries[lib_id] = entries
 
 
 def _vec(v: list[float] | None) -> str | None:
@@ -188,3 +201,21 @@ class PgRepo:
     def unwant(self, keys: list[str]) -> None:
         with self.pool.connection() as c:
             c.execute("DELETE FROM wanted WHERE key = ANY(%s)", (keys,))
+
+    def library_create(self, lib_id: str) -> None:
+        with self.pool.connection() as c:
+            c.execute("INSERT INTO libraries (id) VALUES (%s) ON CONFLICT DO NOTHING", (lib_id,))
+
+    def library_get(self, lib_id: str) -> dict[str, dict] | None:
+        with self.pool.connection() as c:
+            row = c.execute("SELECT entries FROM libraries WHERE id = %s", (lib_id,)).fetchone()
+        return None if row is None else row[0]
+
+    def library_put(self, lib_id: str, entries: dict[str, dict]) -> None:
+        from psycopg.types.json import Jsonb
+
+        with self.pool.connection() as c:
+            c.execute(
+                "UPDATE libraries SET entries = %s, updated_at = now() WHERE id = %s",
+                (Jsonb(entries), lib_id),
+            )

@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { agent, useDesktop, type AgentStatus, type LocalTrack } from "@/lib/agent";
 import { api, type Coverage, type YouTubeLinkReport } from "@/lib/api";
-import { importItems, loadLibrary, queueWaypoint, refreshLibrary, type LibraryEntry } from "@/lib/library";
+import { importItems, loadLibrary, queueWaypoint, refreshLibrary, syncLibrary, type LibraryEntry } from "@/lib/library";
+import { createSyncCode, getSyncCode, lastSynced, setSyncCode } from "@/lib/sync";
 import { disconnectSpotify, finishSpotifyLogin, spotify, spotifyConnected, startSpotifyLogin } from "@/lib/spotify";
 
 const COVERAGE: { key: Coverage; label: string; color: string; note: string }[] = [
@@ -351,6 +352,155 @@ function FilesCard({ onSubmitted }: { onSubmitted: () => void }) {
   );
 }
 
+function ago(t: number) {
+  const s = Math.round((Date.now() - t) / 1000);
+  return s < 60 ? "just now" : s < 3600 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
+}
+
+function SyncBar({ onSynced }: { onSynced: (e: LibraryEntry[]) => void }) {
+  const [code, setCode] = useState<string | null | undefined>(undefined);
+  const [last, setLast] = useState<{ at: number; count: number } | null>(null);
+  const [reveal, setReveal] = useState(false);
+  const [entering, setEntering] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const refreshMeta = useCallback(async () => {
+    setCode((await getSyncCode()) ?? null);
+    setLast((await lastSynced()) ?? null);
+  }, []);
+
+  const sync = useCallback(async () => {
+    setBusy("Syncing…");
+    setError(null);
+    try {
+      onSynced(await syncLibrary());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+      refreshMeta();
+    }
+  }, [onSynced, refreshMeta]);
+
+  useEffect(() => {
+    getSyncCode()
+      .then((c) => {
+        setCode(c ?? null);
+        if (c) sync();
+        else refreshMeta();
+      })
+      .catch(() => setCode(null));
+  }, [sync, refreshMeta]);
+
+  const turnOn = async () => {
+    setBusy("Creating your code…");
+    setError(null);
+    try {
+      await setSyncCode(await createSyncCode());
+      setReveal(true);
+      await sync();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(null);
+    }
+  };
+
+  const useCode = async () => {
+    await setSyncCode(typed);
+    setEntering(false);
+    setTyped("");
+    await sync();
+    if (!(await lastSynced())) await setSyncCode(null); // bad code: don't keep it
+    refreshMeta();
+  };
+
+  if (code === undefined) return null;
+  return (
+    <section className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3 text-sm">
+      {code ? (
+        <>
+          <span className="flex items-center gap-2">
+            <span className="inline-block size-2 rounded-full" style={{ background: "var(--good)" }} />
+            <span className="font-medium">Sync on</span>
+            <span className="text-muted">
+              {busy ?? (last ? `${last.count.toLocaleString()} songs · synced ${ago(last.at)}` : "not synced yet")}
+            </span>
+          </span>
+          <span className="tabular rounded-md bg-page px-2 py-0.5 font-mono text-xs tracking-wider">
+            {reveal ? code : `${code.slice(0, 4)}-••••-••••-••••-••••`}
+          </span>
+          <button className="text-xs text-accent hover:underline" onClick={() => setReveal(!reveal)}>
+            {reveal ? "Hide" : "Show code"}
+          </button>
+          <button
+            className="text-xs text-accent hover:underline"
+            onClick={() => {
+              navigator.clipboard?.writeText(code).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              });
+            }}
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+          <span className="ml-auto flex gap-3 text-xs">
+            <button className="text-accent hover:underline disabled:opacity-40" disabled={!!busy} onClick={sync}>
+              Sync now
+            </button>
+            <button
+              className="text-muted hover:text-ink"
+              onClick={async () => {
+                await setSyncCode(null);
+                refreshMeta();
+              }}
+              title="Stops syncing in this browser. Your songs stay here and in the synced library."
+            >
+              Turn off here
+            </button>
+          </span>
+          {reveal && (
+            <p className="w-full text-xs text-muted">
+              Keep this code private: anyone with it can see this library. Enter it in another browser or the desktop app to use the same library.
+            </p>
+          )}
+        </>
+      ) : entering ? (
+        <>
+          <input
+            autoFocus
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            placeholder="XXXX-XXXX-XXXX-XXXX-XXXX"
+            className="w-72 rounded-lg border border-line bg-page px-2.5 py-1 font-mono text-sm tracking-wider placeholder:text-muted"
+          />
+          <button className={btn} disabled={typed.replace(/[^0-9a-z]/gi, "").length < 20 || !!busy} onClick={useCode}>
+            Use this code
+          </button>
+          <button className="text-xs text-muted hover:text-ink" onClick={() => setEntering(false)}>
+            Cancel
+          </button>
+        </>
+      ) : (
+        <>
+          <span className="text-ink-2">Use this library in other browsers and the desktop app.</span>
+          <span className="ml-auto flex gap-2">
+            <button className={btn} disabled={!!busy} onClick={turnOn}>
+              {busy ?? "Turn on sync"}
+            </button>
+            <button className={ghost} onClick={() => setEntering(true)}>
+              I have a code
+            </button>
+          </span>
+        </>
+      )}
+      {error && <p className="w-full text-xs" style={{ color: "var(--critical)" }}>{error}</p>}
+    </section>
+  );
+}
+
 export default function LibraryPage() {
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [filter, setFilter] = useState<Coverage | "all">("all");
@@ -400,6 +550,7 @@ export default function LibraryPage() {
           {storageError}
         </p>
       )}
+      <SyncBar onSynced={setEntries} />
       <div className="mb-6 grid gap-4 md:grid-cols-3">
         <SpotifyCard onImported={reload} />
         <YouTubeCard onImported={reload} />

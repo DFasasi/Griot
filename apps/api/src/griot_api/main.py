@@ -166,6 +166,41 @@ def create_app(service: BridgeService | None = None) -> FastAPI:
         """Imported songs nobody has analysed yet, most-requested first."""
         return s.repo.wanted(min(limit, 1000))
 
+    # ---------------------------------------------------------------- library sync
+
+    from griot_api import sync as sync_mod
+
+    def sync_id(x_griot_sync: Annotated[str | None, Header()] = None) -> str:
+        if not x_griot_sync:
+            raise HTTPException(401, "missing sync code")
+        try:
+            return sync_mod.library_id(x_griot_sync)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
+
+    class SyncBody(BaseModel):
+        entries: list[dict]
+
+    @app.post("/sync/new")
+    def sync_new(s: Svc) -> dict:
+        """Issue a new private sync code. Shown to the user once; only its hash is stored."""
+        code = sync_mod.new_code()
+        s.repo.library_create(sync_mod.library_id(code))
+        return {"code": code}
+
+    @app.post("/sync/merge")
+    def sync_merge(s: Svc, body: SyncBody, lib: Annotated[str, Depends(sync_id)]) -> dict:
+        """Send this device's library, get back the union across all devices using the code."""
+        existing = s.repo.library_get(lib)
+        if existing is None:
+            raise HTTPException(404, "unknown sync code")
+        merged = sync_mod.merge(existing, body.entries)
+        if len(merged) > sync_mod.MAX_ENTRIES:
+            raise HTTPException(413, f"libraries are limited to {sync_mod.MAX_ENTRIES} songs")
+        if merged != existing:
+            s.repo.library_put(lib, merged)
+        return {"entries": list(merged.values()), "count": len(merged)}
+
     @app.get("/config")
     def config() -> dict:
         """Public, non-secret client settings (OAuth client ids are public by design)."""

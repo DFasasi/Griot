@@ -64,3 +64,14 @@ def test_pg_wanted_queue_counts_requests_and_clears(repo):
     assert w["requests"] == 2 and w["preview_url"] == "p"  # a later null doesn't erase the preview
     repo.unwant(["USX1"])
     assert repo.wanted(10) == []
+
+
+def test_pg_sync_library_roundtrip(repo):
+    from griot_api import sync
+
+    lib = sync.library_id(sync.new_code())
+    repo.library_create(lib)
+    assert repo.library_get(lib) == {}
+    merged = sync.merge({}, [{"item": {"source": "youtube", "source_id": "v1", "title": "T"}, "added": 1}])
+    repo.library_put(lib, merged)
+    assert repo.library_get(lib) == merged
