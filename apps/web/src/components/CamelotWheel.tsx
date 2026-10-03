@@ -49,6 +49,8 @@ export function CamelotWheel({ tracks }: { tracks: BridgeTrack[] }) {
         <text x={C} y={C - 4} textAnchor="middle" fontSize={9} fill="var(--muted)">outer = major</text>
         <text x={C} y={C + 8} textAnchor="middle" fontSize={9} fill="var(--muted)">inner = minor</text>
         <polyline
+          pathLength={1}
+          className="draw-slow"
           points={placed.map((p) => `${p.x},${p.y}`).join(" ")}
           fill="none"
           stroke="var(--s1)"
@@ -63,7 +65,16 @@ export function CamelotWheel({ tracks }: { tracks: BridgeTrack[] }) {
           return (
             <g key={i} onPointerEnter={() => setHover(i)} onPointerLeave={() => setHover(null)}>
               <circle cx={p.x} cy={p.y} r={12} fill="transparent" />
-              <circle cx={p.x} cy={p.y} r={isWp ? 6 : 4.5} fill={isWp ? "var(--ink)" : "var(--s1)"} stroke="var(--surface)" strokeWidth={2} />
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={isWp ? 6 : 4.5}
+                fill={isWp ? "var(--ink)" : "var(--s1)"}
+                stroke="var(--surface)"
+                strokeWidth={2}
+                className="pop-in"
+                style={{ animationDelay: `${(i / Math.max(placed.length - 1, 1)) * 1400}ms` }}
+              />
               {stop.count > 1 && (
                 <text x={p.x + 9} y={p.y - 7} fontSize={9} fill="var(--ink-2)" className="tabular">
                   ×{stop.count}

@@ -99,3 +99,12 @@ def test_submissions_disabled_without_configured_tokens(monkeypatch, tracks):
     assert (
         c.post("/submissions", json=[doc], headers={"Authorization": "Bearer dev-token"}).status_code == 503
     )
+
+
+def test_bridge_notes_isolated_waypoints(client, tracks, monkeypatch):
+    body = {"waypoints": [tracks[0].id, tracks[1].id], "length": 3, "filters": {"min_playcount": None}}
+    monkeypatch.setattr(BridgeService, "ISOLATED_SEAM", 99.0)
+    assert client.post("/bridges", json=body).json()["notes"] == []
+    monkeypatch.setattr(BridgeService, "ISOLATED_SEAM", -1.0)
+    notes = client.post("/bridges", json=body).json()["notes"]
+    assert len(notes) == 2 and tracks[0].title in notes[0]

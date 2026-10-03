@@ -243,6 +243,30 @@ class BridgeService:
             ok &= (cat.year < 0) | (cat.year <= f.year_max)
         return ok
 
+    ISOLATED_SEAM = 0.6  # best available seam worse than this -> the catalog is thin around a waypoint
+
+    @staticmethod
+    def _isolation_notes(cat: Catalog, wps: list[int], allowed: np.ndarray, w: dict) -> list[str]:
+        """Warn when even the smoothest possible transition out of/into a waypoint is rough, so a
+        jarring step is explained by the catalog rather than looking like a bad choice."""
+        from griot_core.cost import transition_cost as tc
+
+        mask = allowed.copy()
+        mask[wps] = False  # a song flows perfectly into itself; only other songs count
+        pool = np.flatnonzero(mask)
+        notes = []
+        for k, i in enumerate(wps):
+            t = cat.tracks[i]
+            best_out = float(tc(cat, [i], pool, w)[0].min()) if k < len(wps) - 1 else 0.0
+            best_in = float(tc(cat, pool, [i], w)[:, 0].min()) if k > 0 else 0.0
+            if max(best_out, best_in) > BridgeService.ISOLATED_SEAM:
+                notes.append(
+                    f"Few songs in the catalog flow smoothly {'out of' if best_out >= best_in else 'into'} "
+                    f"“{t.title}” by {t.artist}, so the first step near it is a bigger jump. "
+                    "Import or analyse more songs like it to smooth this out."
+                )
+        return notes
+
     def bridge(self, req: BridgeRequest) -> BridgeResponse:
         cat = self.catalog
         missing = [w for w in req.waypoints if w not in cat.index]
@@ -285,7 +309,9 @@ class BridgeService:
             Transition(from_id=cat.ids[x["from"]], to_id=cat.ids[x["to"]], cost=x["cost"], terms=x["terms"])
             for x in leg.transitions
         ]
+        notes = self._isolation_notes(cat, wps, self._allowed(cat, req), pf.w)
         return BridgeResponse(
+            notes=notes,
             tracks=tracks,
             transitions=transitions,
             total_cost=round(leg.cost, 4),

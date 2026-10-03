@@ -29,6 +29,56 @@ function Panel({ title, note, children }: { title: string; note?: string; childr
   );
 }
 
+/** How a transition will feel, in words and colour (never colour alone). */
+function SeamBadge({ cost }: { cost: number }) {
+  const [label, color] = cost < 0.35 ? ["smooth", "var(--good)"] : cost < 0.7 ? ["okay", "var(--gold)"] : ["rough", "var(--terracotta)"];
+  return (
+    <span
+      className="mr-1 inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-[11px]"
+      title={`Seam cost ${cost.toFixed(2)} — lower is smoother`}
+    >
+      <span className="inline-block size-1.5 rounded-full" style={{ background: color }} />
+      <span className="text-ink-2">{label}</span>
+    </span>
+  );
+}
+
+function PlayingBars() {
+  return (
+    <span aria-hidden className="flex h-3 items-end gap-[2px]">
+      {[0.1, 0.5, 0.3].map((d) => (
+        <span key={d} className="eq-bar w-[2px] rounded-sm bg-accent" style={{ height: "100%", animationDelay: `${-d}s` }} />
+      ))}
+    </span>
+  );
+}
+
+/** Shown while the search runs: a pulsing waveform and the bridge taking shape. */
+function Composing({ count }: { count: number }) {
+  return (
+    <section className="rounded-xl border border-line bg-surface p-6">
+      <div className="mb-5 flex items-center gap-3">
+        <span aria-hidden className="flex h-6 items-end gap-[3px]">
+          {Array.from({ length: 12 }, (_, i) => (
+            <span
+              key={i}
+              className="eq-bar w-[3px] rounded-sm"
+              style={{ height: "100%", animationDelay: `${-(i % 5) * 0.21}s`, background: i % 3 ? "var(--accent-text)" : "var(--gold)" }}
+            />
+          ))}
+        </span>
+        <p className="font-display text-lg">Composing your bridge…</p>
+      </div>
+      <p className="mb-4 text-sm text-ink-2">Weighing every hand-off between candidate songs: sound, tempo, key, energy and mood at each seam.</p>
+      <ol className="space-y-2">
+        {Array.from({ length: Math.min(count, 10) }, (_, i) => (
+          <li key={i} className="shimmer h-9 rounded-lg" style={{ animationDelay: `${i * 0.08}s`, opacity: 1 - i * 0.07 }} />
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 export default function Studio() {
   const [waypoints, setWaypoints] = useState<TrackHit[]>([]);
   const [length, setLength] = useState(10);
@@ -212,19 +262,31 @@ export default function Studio() {
         </aside>
 
         <div className="min-w-0 space-y-5">
-          {!bridge ? (
+          {busy ? (
+            <Composing count={length + waypoints.length} />
+          ) : !bridge ? (
             <div className="flex h-full min-h-80 items-center justify-center rounded-xl border border-dashed border-line p-8 text-center text-sm text-muted">
               Your bridge will appear here: the track list, how energy and mood move through every song, and why each seam works.
             </div>
           ) : (
-            <>
+            <div key={bridge.id} className="space-y-5">
               <Panel
                 title="The bridge"
                 note={`${bridge.tracks.length} tracks · seam cost ${(bridge.total_cost / bridge.transitions.length).toFixed(2)} avg · ${Math.round(bridge.confidence * 100)}% full-song analyzed`}
               >
+                {bridge.notes?.map((n) => (
+                  <p key={n} className="stagger-in mb-3 rounded-lg border border-line bg-surface-2/60 px-3 py-2 text-xs text-ink-2">
+                    <span style={{ color: "var(--gold)" }}>Note · </span>
+                    {n}
+                  </p>
+                ))}
                 <ol className="divide-y divide-line">
                   {bridge.tracks.map((t, i) => (
-                    <li key={t.id} className="flex items-center gap-3 py-2 text-sm">
+                    <li
+                      key={t.id}
+                      className={`stagger-in flex items-center gap-3 py-2 text-sm ${t.role === "waypoint" ? "rounded-lg bg-surface-2/60 px-2 -mx-2" : ""}`}
+                      style={{ animationDelay: `${i * 70}ms` }}
+                    >
                       <span className="tabular w-5 text-xs text-muted">{i + 1}</span>
                       <button
                         onClick={() => play(t.id, t.preview_url)}
@@ -233,7 +295,7 @@ export default function Studio() {
                         aria-label={playing === t.id ? "Stop preview" : "Play preview"}
                         className="flex size-7 shrink-0 items-center justify-center rounded-full border border-line text-xs disabled:opacity-30"
                       >
-                        {playing === t.id ? "■" : "▶"}
+                        {playing === t.id ? <PlayingBars /> : "▶"}
                       </button>
                       <div className="min-w-0 flex-1">
                         <div className="truncate">
@@ -248,7 +310,7 @@ export default function Studio() {
                       </div>
                       {i < bridge.transitions.length && (
                         <div className="flex shrink-0 items-center gap-1 text-xs" title="Rate the transition into the next track">
-                          <span className="tabular mr-1 text-muted">→ {bridge.transitions[i].cost.toFixed(2)}</span>
+                          <SeamBadge cost={bridge.transitions[i].cost} />
                           <button
                             aria-label="Good transition"
                             onClick={() => rate(i, 1)}
@@ -309,7 +371,7 @@ export default function Studio() {
                   <CamelotWheel tracks={bridge.tracks} />
                 </Panel>
               </div>
-            </>
+            </div>
           )}
         </div>
       </div>

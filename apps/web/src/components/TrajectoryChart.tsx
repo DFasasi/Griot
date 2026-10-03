@@ -25,7 +25,7 @@ export function TrajectoryChart({ tracks, details }: { tracks: BridgeTrack[]; de
 
   const { points, bounds, total } = useMemo(() => {
     const points: Point[] = [];
-    const bounds: { start: number; end: number }[] = [];
+    const bounds: { start: number; end: number; preview: boolean }[] = [];
     let offset = 0;
     tracks.forEach((tr, song) => {
       const d = details[tr.id];
@@ -41,8 +41,11 @@ export function TrajectoryChart({ tracks, details }: { tracks: BridgeTrack[]; de
       energy.forEach((e, i) =>
         points.push({ t: offset + i * hop, energy: e, valence: val ? val[i] ?? null : null, song, local: i * hop }),
       );
-      bounds.push({ start: offset, end: offset + d.duration_s });
-      offset += d.duration_s;
+      // Preview-only analyses cover 30 s, not the whole song: give them their real span.
+      const preview = d.analyzer?.full_audio === false;
+      const span = preview ? energy.length * hop : d.duration_s;
+      bounds.push({ start: offset, end: offset + span, preview });
+      offset += span;
     });
     return { points, bounds, total: offset };
   }, [tracks, details]);
@@ -88,13 +91,32 @@ export function TrajectoryChart({ tracks, details }: { tracks: BridgeTrack[]; de
           <span className="inline-block h-0.5 w-4 rounded" style={{ background: "var(--s2)" }} /> Valence (mood)
         </span>
         <span className="text-muted">within each song, end to end</span>
+        {bounds.some((b) => b.preview) && (
+          <span className="flex items-center gap-1.5 text-muted">
+            <svg width="12" height="10" aria-hidden>
+              <rect width="12" height="10" fill="url(#legendHatch)" stroke="var(--border)" />
+              <defs>
+                <pattern id="legendHatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                  <line x1="0" y1="0" x2="0" y2="4" stroke="var(--muted)" strokeWidth="1" />
+                </pattern>
+              </defs>
+            </svg>
+            30 s preview (full song not analysed yet)
+          </span>
+        )}
       </div>
       <svg width={width} height={H} role="img" aria-label="Energy and valence across the bridge">
+        <defs>
+          <pattern id="previewHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="6" stroke="var(--muted)" strokeWidth="1" strokeOpacity="0.35" />
+          </pattern>
+        </defs>
         {bounds.map((b, i) => (
           <g key={i}>
             {i % 2 === 1 && (
               <rect x={x(b.start)} y={M.top} width={x(b.end) - x(b.start)} height={ih} fill="var(--grid)" opacity={0.35} />
             )}
+            {b.preview && <rect x={x(b.start)} y={M.top} width={x(b.end) - x(b.start)} height={ih} fill="url(#previewHatch)" />}
             <text
               x={(x(b.start) + x(b.end)) / 2}
               y={M.top - 10}
@@ -115,13 +137,16 @@ export function TrajectoryChart({ tracks, details }: { tracks: BridgeTrack[]; de
             </text>
           </g>
         ))}
-        {Array.from({ length: Math.floor(total / 300) + 1 }, (_, i) => i * 300).map((t) => (
-          <text key={t} x={x(t)} y={H - 10} textAnchor="middle" fontSize={10} fill="var(--muted)" className="tabular">
-            {Math.round(t / 60)}m
-          </text>
-        ))}
-        <path d={path("valence")} fill="none" stroke="var(--s2)" strokeWidth={2} strokeLinejoin="round" />
-        <path d={path("energy")} fill="none" stroke="var(--s1)" strokeWidth={2} strokeLinejoin="round" />
+        {(() => {
+          const step = total > 1200 ? 300 : total > 400 ? 120 : 30;
+          return Array.from({ length: Math.floor(total / step) + 1 }, (_, i) => i * step).map((t) => (
+            <text key={t} x={x(t)} y={H - 10} textAnchor="middle" fontSize={10} fill="var(--muted)" className="tabular">
+              {t >= 60 ? `${Math.floor(t / 60)}m${t % 60 ? ` ${t % 60}s` : ""}` : `${t}s`}
+            </text>
+          ));
+        })()}
+        <path d={path("valence")} pathLength={1} className="draw-slow" fill="none" stroke="var(--s2)" strokeWidth={2} strokeLinejoin="round" />
+        <path d={path("energy")} pathLength={1} className="draw-slow" fill="none" stroke="var(--s1)" strokeWidth={2} strokeLinejoin="round" />
         {last && (
           <>
             <text x={x(last.t) + 6} y={y(last.energy) + 3} fontSize={10} fill="var(--ink-2)">

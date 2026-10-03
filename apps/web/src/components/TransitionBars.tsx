@@ -64,7 +64,7 @@ export function TransitionBars({ tracks, transitions }: { tracks: BridgeTrack[];
             const segs = TERMS.map((k, i) => ({ k, i, v: t.terms[k] ?? 0 })).filter((s) => s.v > 0.001);
             let cx = LABEL_W;
             return (
-              <g key={row}>
+              <g key={row} className="stagger-in" style={{ animationDelay: `${row * 70}ms` }}>
                 <text x={LABEL_W - 8} y={y + ROW / 2 + 4} textAnchor="end" fontSize={10} fill="var(--muted)" className="tabular">
                   {row + 1}→{row + 2}
                 </text>
@@ -79,6 +79,8 @@ export function TransitionBars({ tracks, transitions }: { tracks: BridgeTrack[];
                   return (
                     <path
                       key={s.k}
+                      className="grow-x"
+                      style={{ animationDelay: `${row * 70 + 120}ms` }}
                       d={d}
                       fill={`var(--s${s.i + 1})`}
                       opacity={hover && (hover.row !== row || hover.term !== s.k) ? 0.45 : 1}

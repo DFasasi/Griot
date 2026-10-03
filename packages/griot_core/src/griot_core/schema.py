@@ -178,6 +178,7 @@ class BridgeResponse(BaseModel):
     total_cost: float
     confidence: float  # share of full-song-analyzed tracks
     weights: dict[str, float]
+    notes: list[str] = Field(default_factory=list)  # plain-language caveats, e.g. isolated waypoints
 
 
 # ---------------------------------------------------------------- library import / cross-platform mapping

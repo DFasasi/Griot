@@ -43,6 +43,7 @@ export type Bridge = {
   total_cost: number;
   confidence: number;
   weights: Record<string, number>;
+  notes?: string[];
 };
 
 export type TrackDetail = {
@@ -51,6 +52,7 @@ export type TrackDetail = {
   global: { bpm: number; lufs: number; valence: number | null };
   structure: { segments: { start: number; end: number; label: string }[] };
   trajectory: { hop_s: number; energy: number[]; valence: number[] };
+  analyzer?: { full_audio: boolean };
 };
 
 /** "/api" in dev and on desktop (both proxy); a full URL for a static web host. */
