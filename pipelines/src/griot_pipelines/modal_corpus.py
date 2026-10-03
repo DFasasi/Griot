@@ -268,7 +268,11 @@ L4_PER_HOUR = 0.80  # USD, Modal list price; container time also includes model 
 
 @app.local_entrypoint()
 def previews(n: int = 200, batch: int = 10) -> None:
-    """Read the local API's queue, analyse previews on Modal, submit results back locally."""
+    """Work through the local API's queue on Modal, `n` songs at most (a cost guard).
+
+    The queue endpoint returns ≤1000 songs per call, so this runs in passes, never retrying a
+    song already attempted in this run (songs without a preview stay queued for next time).
+    """
     import os
     import time
 
@@ -280,20 +284,27 @@ def previews(n: int = 200, batch: int = 10) -> None:
     api = os.environ.get("GRIOT_API_URL", "http://127.0.0.1:8000")
     headers = {"Authorization": f"Bearer {os.environ.get('GRIOT_SUBMIT_TOKEN', '')}"}
     with httpx.Client(base_url=api, headers=headers, timeout=120) as c:
-        queue = [
-            q for q in c.get("/wanted", params={"limit": n}).raise_for_status().json() if q.get("preview_url")
-        ]
-        print(f"{len(queue)} queued songs with previews")
-        batches = [queue[i : i + batch] for i in range(0, len(queue), batch)]
         started, gpu_s, done, failed, skipped = time.time(), 0.0, 0, [], []
-        for res in Analyzer().analyze_previews.map(batches, order_outputs=False):
-            gpu_s += res["seconds"]
-            failed += res["failed"]
-            skipped += res["skipped"]
-            if res["docs"]:
-                c.post("/submissions", json=res["docs"]).raise_for_status()
-                done += len(res["docs"])
-            print(f"{done}/{len(queue)} analysed · {len(failed)} failed · {len(skipped)} without preview")
+        attempted: set[str] = set()
+        while len(attempted) < n:
+            page = c.get("/wanted", params={"limit": 1000}).raise_for_status().json()
+            queue = [q for q in page if q.get("preview_url") and q["key"] not in attempted][
+                : n - len(attempted)
+            ]
+            if not queue:
+                break
+            attempted.update(q["key"] for q in queue)
+            print(f"pass: {len(queue)} songs (attempted {len(attempted)}/{n} this run)")
+            batches = [queue[i : i + batch] for i in range(0, len(queue), batch)]
+            for res in Analyzer().analyze_previews.map(batches, order_outputs=False):
+                gpu_s += res["seconds"]
+                failed += res["failed"]
+                skipped += res["skipped"]
+                if res["docs"]:
+                    c.post("/submissions", json=res["docs"]).raise_for_status()
+                    done += len(res["docs"])
+                cost = gpu_s / 3600 * L4_PER_HOUR
+                print(f"{done} analysed · {len(failed)} failed · {len(skipped)} no preview · ${cost:.2f}")
         wall = time.time() - started
     per_song = gpu_s / max(done, 1)
     print(
