@@ -267,6 +267,56 @@ class BridgeService:
                 )
         return notes
 
+    def active_weights(self) -> dict[str, float] | None:
+        """Weights tuned from listener ratings, if a tuning run has been applied."""
+        tuned = self.repo.get_setting("weights")
+        return tuned.get("weights") if tuned else None
+
+    def tuning_status(self) -> dict:
+        from griot_core.tuning import MIN_EACH, MIN_RATINGS
+
+        rows = self.repo.feedback_rows()
+        up = sum(1 for *_, r in rows if r > 0)
+        return {
+            "ratings": len(rows),
+            "up": up,
+            "down": len(rows) - up,
+            "needed": MIN_RATINGS,
+            "min_each": MIN_EACH,
+            "ready": len(rows) >= MIN_RATINGS and min(up, len(rows) - up) >= MIN_EACH,
+            "last": self.repo.get_setting("weights"),
+        }
+
+    def run_tuning(self, apply: bool = True) -> dict:
+        import datetime as dt
+
+        import numpy as np
+
+        from griot_core.cost import merged_weights
+        from griot_core.tuning import features, tune
+
+        rows = [(features(t, w), r) for t, w, r in self.repo.feedback_rows()]
+        rows = [(x, r) for x, r in rows if x is not None]
+        current = merged_weights(self.active_weights())
+        X = np.array([x for x, _ in rows]) if rows else np.zeros((0, 7))
+        y = np.array([1 if r > 0 else 0 for _, r in rows])
+        rep = tune(X, y, current)
+        result = {
+            k: getattr(rep, k)
+            for k in ("n", "up", "down", "auc_current", "auc_tuned", "current", "tuned", "apply", "reason")
+        }
+        if rep.apply and apply:
+            self.repo.set_setting(
+                "weights",
+                {
+                    "weights": rep.tuned,
+                    "at": dt.datetime.now(dt.UTC).isoformat(),
+                    "auc": [rep.auc_current, rep.auc_tuned],
+                    "n": rep.n,
+                },
+            )
+        return result
+
     def bridge(self, req: BridgeRequest) -> BridgeResponse:
         cat = self.catalog
         missing = [w for w in req.waypoints if w not in cat.index]
@@ -281,7 +331,9 @@ class BridgeService:
         if req.prompt and self.embed_text is not None:
             steer = self.embed_text(req.prompt)
 
-        pf = Pathfinder(cat, weights=req.weights, max_per_artist=req.filters.max_per_artist)
+        pf = Pathfinder(
+            cat, weights=req.weights or self.active_weights(), max_per_artist=req.filters.max_per_artist
+        )
         try:
             leg = pf.bridge(wps, gaps, allowed=self._allowed(cat, req), arc=req.arc, steer=steer)
         except ValueError as e:

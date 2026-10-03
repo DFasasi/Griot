@@ -5,8 +5,9 @@ import { CamelotWheel } from "@/components/CamelotWheel";
 import { TrajectoryChart } from "@/components/TrajectoryChart";
 import { TransitionBars } from "@/components/TransitionBars";
 import { SpotifyExport } from "@/components/SpotifyExport";
+import { TasteMeter } from "@/components/TasteMeter";
 import { WaypointPicker } from "@/components/WaypointPicker";
-import { api, type ArcPoint, type Bridge, type TrackDetail, type TrackHit } from "@/lib/api";
+import { api, type ArcPoint, type Bridge, type TrackDetail, type TrackHit, type TuningStatus } from "@/lib/api";
 import { takeQueuedWaypoints, youtubeIds } from "@/lib/library";
 
 const ARCS: Record<string, { label: string; arc: ArcPoint[] | null }> = {
@@ -171,10 +172,16 @@ export default function Studio() {
     setPlaying(id);
   };
 
+  const [taste, setTaste] = useState<TuningStatus | null>(null);
+  const refreshTaste = () => api.tuningStatus().then(setTaste).catch(() => {});
+  useEffect(() => {
+    refreshTaste();
+  }, []);
+
   const rate = (pos: number, r: 1 | -1) => {
     if (!bridge) return;
     setRatings((x) => ({ ...x, [pos]: r }));
-    api.feedback(bridge.id, pos, r).catch(() => {});
+    api.feedback(bridge.id, pos, r).then(refreshTaste).catch(() => {});
   };
 
   return (
@@ -259,6 +266,7 @@ export default function Studio() {
             {busy ? "Building…" : waypoints.length < 2 ? "Add at least two songs" : "Build the bridge"}
           </button>
           {error && <p className="text-sm" style={{ color: "var(--critical)" }}>{error}</p>}
+          <TasteMeter status={taste} />
         </aside>
 
         <div className="min-w-0 space-y-5">

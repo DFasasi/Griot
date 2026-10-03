@@ -8,6 +8,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 from rich.progress import Progress
+from rich.table import Table
 
 from griot_core.env import load_dotenv
 from griot_core.schema import TrackFeatures
@@ -207,6 +208,34 @@ def fix_tempo(
             docs = [t.model_dump(mode="json", by_alias=True) for t, _, _ in fixed[i : i + 25]]
             c.post("/submissions", json=docs).raise_for_status()
     console.print(f"resubmitted {len(fixed)} corrected tracks")
+
+
+@app.command()
+def tune(
+    api: str = typer.Option(os.environ.get("GRIOT_API_URL", "http://127.0.0.1:8000")),
+    token: str = typer.Option(os.environ.get("GRIOT_SUBMIT_TOKEN", ""), help="Submit token for the API"),
+    dry_run: bool = typer.Option(False, help="Fit and report, but don't apply"),
+) -> None:
+    """Tune transition scoring to your 👍/👎 ratings (applied only if it predicts them better)."""
+    import httpx
+
+    r = httpx.post(
+        f"{api}/tuning/run",
+        params={"apply": not dry_run},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=300,
+    )
+    r.raise_for_status()
+    rep = r.json()
+    console.print(f"{rep['n']} rated transitions ({rep['up']} 👍, {rep['down']} 👎)")
+    console.print(rep["reason"])
+    if rep["auc_current"] is not None:
+        t = Table("term", "current", "tuned")
+        for k in ("sound", "tempo", "key", "energy", "mood", "lyrics", "popularity"):
+            t.add_row(k, f"{rep['current'][k]:.2f}", f"{rep['tuned'][k]:.2f}")
+        console.print(t)
+    if rep["apply"] and not dry_run:
+        console.print("[green]applied — new bridges use the tuned scoring")
 
 
 if __name__ == "__main__":

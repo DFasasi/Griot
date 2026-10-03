@@ -47,6 +47,9 @@ class Repo(Protocol):
     def library_create(self, lib_id: str) -> None: ...
     def library_get(self, lib_id: str) -> dict[str, dict] | None: ...
     def library_put(self, lib_id: str, entries: dict[str, dict]) -> None: ...
+    def feedback_rows(self) -> list[tuple[dict, dict, int]]: ...
+    def get_setting(self, key: str) -> dict | None: ...
+    def set_setting(self, key: str, value: dict) -> None: ...
 
 
 class MemoryRepo:
@@ -57,6 +60,7 @@ class MemoryRepo:
         self.ratings: list[tuple[str, int, int]] = []
         self._wanted: dict[str, dict] = {}
         self._libraries: dict[str, dict[str, dict]] = {}
+        self._settings: dict[str, dict] = {}
 
     @classmethod
     def from_jsonl(cls, path: Path) -> MemoryRepo:
@@ -113,6 +117,23 @@ class MemoryRepo:
 
     def library_put(self, lib_id: str, entries: dict[str, dict]) -> None:
         self._libraries[lib_id] = entries
+
+    def feedback_rows(self) -> list[tuple[dict, dict, int]]:
+        latest: dict[tuple[str, int], int] = {}
+        for bid, pos, rating in self.ratings:  # last rating per transition wins
+            latest[(bid, pos)] = rating
+        out = []
+        for (bid, pos), rating in latest.items():
+            resp = self.bridges[bid]["response"]
+            if pos < len(resp["transitions"]):
+                out.append((resp["transitions"][pos]["terms"], resp["weights"], rating))
+        return out
+
+    def get_setting(self, key: str) -> dict | None:
+        return self._settings.get(key)
+
+    def set_setting(self, key: str, value: dict) -> None:
+        self._settings[key] = value
 
 
 def _vec(v: list[float] | None) -> str | None:
@@ -269,4 +290,28 @@ class PgRepo:
             c.execute(
                 "UPDATE libraries SET entries = %s, updated_at = now() WHERE id = %s",
                 (Jsonb(entries), lib_id),
+            )
+
+    def feedback_rows(self) -> list[tuple[dict, dict, int]]:
+        sql = """
+            SELECT DISTINCT ON (f.bridge_id, f.position)
+                   b.response -> 'transitions' -> f.position -> 'terms', b.response -> 'weights', f.rating
+            FROM bridge_feedback f JOIN bridges b ON b.id = f.bridge_id
+            ORDER BY f.bridge_id, f.position, f.created_at DESC"""
+        with self.pool.connection() as c:
+            return [(t, w, r) for t, w, r in c.execute(sql).fetchall() if t is not None]
+
+    def get_setting(self, key: str) -> dict | None:
+        with self.pool.connection() as c:
+            row = c.execute("SELECT value FROM app_settings WHERE key = %s", (key,)).fetchone()
+        return None if row is None else row[0]
+
+    def set_setting(self, key: str, value: dict) -> None:
+        from psycopg.types.json import Jsonb
+
+        with self.pool.connection() as c:
+            c.execute(
+                "INSERT INTO app_settings (key, value) VALUES (%s, %s) "
+                "ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()",
+                (key, Jsonb(value)),
             )

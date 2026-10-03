@@ -221,6 +221,21 @@ def create_app(service: BridgeService | None = None) -> FastAPI:
             s.repo.library_put(lib, merged)
         return {"entries": list(merged.values()), "count": len(merged)}
 
+    # ---------------------------------------------------------------- tuning from ratings
+
+    @app.get("/tuning/status")
+    def tuning_status(s: Svc) -> dict:
+        """How many transitions have been rated, and whether there are enough to tune."""
+        return s.tuning_status()
+
+    @app.post("/tuning/run")
+    def tuning_run(s: Svc, who: Annotated[str, Depends(submitter)], apply: bool = True) -> dict:
+        """Fit weights to the ratings; applied server-wide only if better on held-out ratings."""
+        import math
+
+        rep = s.run_tuning(apply=apply)
+        return {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in rep.items()}
+
     @app.get("/config")
     def config() -> dict:
         """Public, non-secret client settings (OAuth client ids are public by design)."""

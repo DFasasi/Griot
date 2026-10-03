@@ -80,6 +80,7 @@ export const api = {
   feedback: (id: string, position: number, rating: 1 | -1) =>
     req<void>(`/bridges/${id}/feedback`, { method: "POST", body: JSON.stringify({ position, rating }) }),
   m3uUrl: (id: string) => `${API_BASE}/bridges/${id}/m3u`,
+  tuningStatus: () => req<TuningStatus>("/tuning/status"),
   config: () => req<{ spotify_client_id: string | null; youtube_import: boolean }>("/config"),
   resolve: (items: ImportItem[]) => req<Resolution[]>("/resolve", { method: "POST", body: JSON.stringify(items) }),
   youtubeLinks: (links: string[]) =>
@@ -97,6 +98,16 @@ export type ImportItem = {
   album?: string | null;
   duration_s?: number | null;
   isrc?: string | null;
+};
+
+export type TuningStatus = {
+  ratings: number;
+  up: number;
+  down: number;
+  needed: number;
+  min_each: number;
+  ready: boolean;
+  last: { at: string; n: number; auc: [number, number] } | null;
 };
 
 export type YouTubeLinkReport = { link: string; kind: "playlist" | "video" | null; count: number; error: string | null };

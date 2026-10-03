@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(not DSN, reason="GRIOT_TEST_DATABASE_URL not set
 def repo():
     r = PgRepo(DSN)
     with r.pool.connection() as c:
-        c.execute("TRUNCATE recordings, submissions, bridges, bridge_feedback, wanted")
+        c.execute("TRUNCATE recordings, submissions, bridges, bridge_feedback, wanted, app_settings")
     return r
 
 
@@ -75,3 +75,14 @@ def test_pg_sync_library_roundtrip(repo):
     merged = sync.merge({}, [{"item": {"source": "youtube", "source_id": "v1", "title": "T"}, "added": 1}])
     repo.library_put(lib, merged)
     assert repo.library_get(lib) == merged
+
+
+def test_pg_feedback_rows_latest_rating_wins_and_settings(repo):
+    bid = repo.save_bridge(
+        {"waypoints": []}, {"transitions": [{"terms": {"sound": 0.5}}], "weights": {"sound": 1.0}}
+    )
+    repo.feedback(bid, 0, 1)
+    repo.feedback(bid, 0, -1)
+    assert repo.feedback_rows() == [({"sound": 0.5}, {"sound": 1.0}, -1)]
+    repo.set_setting("weights", {"weights": {"sound": 2.0}})
+    assert repo.get_setting("weights") == {"weights": {"sound": 2.0}}
