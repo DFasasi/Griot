@@ -73,7 +73,7 @@ def create_app(service: BridgeService | None = None) -> FastAPI:
 
     @app.get("/health")
     def health(s: Svc) -> dict:
-        return {"ok": True, "tracks": len(s.catalog)}
+        return {"ok": True, "tracks": s.track_count()}
 
     @app.get("/search")
     def search(s: Svc, q: Annotated[str, Query(min_length=1)], limit: int = 10) -> list[dict]:

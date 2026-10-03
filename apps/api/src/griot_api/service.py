@@ -7,11 +7,13 @@ is faster than a round trip to pgvector; the HNSW indexes take over once the cat
 from __future__ import annotations
 
 import threading
+import time
+from collections import Counter
 from collections.abc import Callable
 
 import numpy as np
 
-from griot_api.repo import Repo
+from griot_api.repo import Repo, identity_row
 from griot_core import Catalog, Pathfinder, allocate_gaps
 from griot_core.catalog import norm_lufs
 from griot_core.schema import (
@@ -43,36 +45,46 @@ class BridgeService:
         self.repo = repo
         self.embed_text = embed_text
         self._cat: Catalog | None = None
+        self._cat_built = 0.0
+        self._stale = False
+        self._rows: dict[str, dict] | None = None  # light identity rows by id
         self._idx: dict[str, dict] = {}
+        self._spaces: Counter = Counter()
         self._lock = threading.Lock()
+        self._ilock = threading.Lock()
         self.resolver = resolver or Resolver(lookup=self.lookup)
 
-    # ------------------------------------------------------------------ catalog
+    # ------------------------------------------------------------------ identity index
+    # Identifying songs (import matching, submissions, search) only needs ids and names, so it
+    # runs on a light index that is updated in place — never on the full feature catalog.
 
-    @property
-    def catalog(self) -> Catalog:
-        with self._lock:
-            if self._cat is None:
-                tracks = self.repo.all_tracks()
-                if len(tracks) < 3:
-                    raise BridgeError("catalog has fewer than 3 tracks")
-                self._cat = Catalog(tracks)
-                self._idx = self._build_index(self._cat.tracks)
-            return self._cat
+    def _ensure_index(self) -> dict[str, dict]:
+        with self._ilock:
+            if self._rows is None:
+                self._rows, self._idx, self._spaces = (
+                    {},
+                    {"isrc": {}, "mbid": {}, "deezer": {}, "name": {}},
+                    Counter(),
+                )
+                for r in self.repo.identities():
+                    self._index_add(r)
+            return self._rows
 
-    @staticmethod
-    def _build_index(tracks: list[TrackFeatures]) -> dict[str, dict]:
-        idx: dict[str, dict] = {"isrc": {}, "mbid": {}, "deezer": {}, "name": {}}
-        for t in tracks:
-            hit = (t.id, t.tier)
-            if t.isrc:
-                idx["isrc"][t.isrc.upper()] = hit
-            if t.mbid:
-                idx["mbid"][t.mbid] = hit
-            if dz := t.external_ids.get("deezer"):
-                idx["deezer"][dz] = hit
-            idx["name"].setdefault((norm(t.artist), norm(t.title)), []).append((t.duration_s, hit))
-        return idx
+    def _index_add(self, r: dict) -> None:
+        old = self._rows.get(r["id"])
+        if old is not None:
+            self._spaces[old["space"]] -= 1
+        self._rows[r["id"]] = r
+        self._spaces[r["space"]] += 1
+        hit = (r["id"], r["tier"])
+        if r.get("isrc"):
+            self._idx["isrc"][r["isrc"].upper()] = hit
+        if r.get("mbid"):
+            self._idx["mbid"][r["mbid"]] = hit
+        if r.get("deezer"):
+            self._idx["deezer"][r["deezer"]] = hit
+        names = self._idx["name"].setdefault((norm(r["artist"]), norm(r["title"])), [])
+        names[:] = [n for n in names if n[1][0] != r["id"]] + [(r["duration_s"], hit)]
 
     def lookup(
         self,
@@ -84,7 +96,7 @@ class BridgeService:
         mbid: str | None = None,
     ) -> tuple[str, str] | None:
         """Find a recording already in the catalog by any identity we have for it."""
-        _ = self.catalog
+        self._ensure_index()
         idx = self._idx
         if mbid and mbid in idx["mbid"]:
             return idx["mbid"][mbid]
@@ -97,38 +109,63 @@ class BridgeService:
                 return hit
         return None
 
+    def track_count(self) -> int:
+        return len(self._ensure_index())
+
+    # ------------------------------------------------------------------ feature catalog (bridges)
+
+    CATALOG_REFRESH_S = 30.0
+
+    @property
+    def catalog(self) -> Catalog:
+        """Full features for pathfinding. Rebuilt lazily — at most every 30 s while songs are
+        streaming in — instead of on every submission."""
+        with self._lock:
+            due = self._stale and time.time() - self._cat_built >= self.CATALOG_REFRESH_S
+            if self._cat is None or due:
+                tracks = self.repo.all_tracks()
+                if len(tracks) < 3:
+                    raise BridgeError("catalog has fewer than 3 tracks")
+                self._cat = Catalog(tracks)
+                self._cat_built, self._stale = time.time(), False
+            return self._cat
+
     def invalidate(self) -> None:
         with self._lock:
-            self._cat = None
+            self._cat, self._stale = None, False
+        with self._ilock:
+            self._rows = None
 
     def submit(self, submitter: str, docs: list[TrackFeatures]) -> list[str]:
         """Store analyses under the catalog's existing id for the same recording, so a file
         analysed locally (MBID id) and a preview analysis (ISRC id) land on one entry."""
-        try:
-            space = self.catalog.space
-        except BridgeError:
-            space = None
-        bad = [d.id for d in docs if space and (d.embeddings.model, len(d.embeddings.full)) != space]
-        if bad:
-            raise BridgeError(f"embedding space mismatch (catalog uses {space[0]}, {space[1]}-d): {bad[:5]}")
-        for d in docs:
-            try:
-                hit = self.lookup(
-                    mbid=d.mbid,
-                    isrc=d.isrc,
-                    deezer_id=d.external_ids.get("deezer"),
-                    artist=d.artist,
-                    title=d.title,
-                    duration=d.duration_s,
+        rows = self._ensure_index()
+        space = self._spaces.most_common(1)[0][0] if rows and self._spaces else None
+        if space and len(rows) >= 3:
+            bad = [d.id for d in docs if (d.embeddings.model, len(d.embeddings.full)) != space]
+            if bad:
+                raise BridgeError(
+                    f"embedding space mismatch (catalog uses {space[0]}, {space[1]}-d): {bad[:5]}"
                 )
-            except BridgeError:  # catalog still too small to have a match
-                hit = None
+        for d in docs:
+            hit = self.lookup(
+                mbid=d.mbid,
+                isrc=d.isrc,
+                deezer_id=d.external_ids.get("deezer"),
+                artist=d.artist,
+                title=d.title,
+                duration=d.duration_s,
+            )
             if hit and hit[0] != d.id:
                 d.id = hit[0]
         ids = self.repo.submit(submitter, docs)
+        with self._ilock:
+            for d in docs:
+                self._index_add(identity_row(d))
         done = [x for d in docs for x in (d.isrc, f"dz:{d.external_ids.get('deezer')}") if x]
         self.repo.unwant([k for k in done if k and not k.endswith(":None")])
-        self.invalidate()
+        with self._lock:
+            self._stale = True
         return ids
 
     def resolve(self, items: list[ImportItem]) -> list[Resolution]:
@@ -153,35 +190,23 @@ class BridgeService:
     # ------------------------------------------------------------------ queries
 
     def search(self, q: str, limit: int = 10) -> list[dict]:
-        cat = self.catalog
+        rows = self._ensure_index()
         terms = q.lower().split()
         scored = []
-        for i, t in enumerate(cat.tracks):
-            hay = f"{t.title} {t.artist}".lower()
+        for r in rows.values():
+            hay = f"{r['title']} {r['artist']}".lower()
             if all(term in hay for term in terms):
                 starts = hay.startswith(terms[0]) if terms else False
-                scored.append((not starts, -(cat.playcount[i] or 0), i))
+                scored.append((not starts, -(r["playcount"] or 0), r["id"]))
         scored.sort()
-        return [self._summary(cat, i) for *_, i in scored[:limit]]
+        keys = ("id", "title", "artist", "bpm", "camelot", "year", "tier", "tags")
+        return [{k: rows[i][k] for k in keys} for *_, i in scored[:limit]]
 
     def track(self, track_id: str) -> TrackFeatures:
-        cat = self.catalog
-        if track_id not in cat.index:
+        t = self.repo.get(track_id)
+        if t is None:
             raise KeyError(track_id)
-        return cat.tracks[cat.index[track_id]]
-
-    def _summary(self, cat: Catalog, i: int) -> dict:
-        t = cat.tracks[i]
-        return {
-            "id": t.id,
-            "title": t.title,
-            "artist": t.artist,
-            "bpm": t.global_.bpm,
-            "camelot": t.global_.camelot,
-            "year": t.year,
-            "tier": t.tier,
-            "tags": list(t.global_.tags)[:3],
-        }
+        return t
 
     def _allowed(self, cat: Catalog, req: BridgeRequest) -> np.ndarray:
         f = req.filters

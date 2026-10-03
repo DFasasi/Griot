@@ -263,6 +263,28 @@ def _download_preview(q: dict) -> bytes:
     return httpx.get(url, timeout=60, follow_redirects=True).raise_for_status().content
 
 
+def _fresh_preview(deezer, deezer_id: str) -> tuple[str | None, str]:
+    """-> (url, "") or (None, reason). Deezer answers rate limits with HTTP 200 + error code 4."""
+    import random
+    import time
+
+    from griot_pipelines.sources import SourceUnavailable
+
+    for attempt in range(6):
+        try:
+            t = deezer._get(f"/track/{deezer_id}")
+        except SourceUnavailable:
+            return None, "Deezer unreachable"
+        err = (t or {}).get("error") or {}
+        if err.get("code") == 4:
+            time.sleep(1.5 * 2**attempt * (0.5 + random.random()))
+            continue
+        if err or not t:
+            return None, "track not on Deezer any more"
+        return (t["preview"], "") if t.get("preview") else (None, "Deezer has no preview")
+    return None, "Deezer rate limit"
+
+
 L4_PER_HOUR = 0.80  # USD, Modal list price; container time also includes model loading
 
 
@@ -275,36 +297,75 @@ def previews(n: int = 200, batch: int = 10) -> None:
     """
     import os
     import time
+    from collections import Counter
 
     import httpx
 
     from griot_core.env import load_dotenv
+    from griot_pipelines.sources import Deezer
 
     load_dotenv()
     api = os.environ.get("GRIOT_API_URL", "http://127.0.0.1:8000")
     headers = {"Authorization": f"Bearer {os.environ.get('GRIOT_SUBMIT_TOKEN', '')}"}
-    with httpx.Client(base_url=api, headers=headers, timeout=120) as c:
-        started, gpu_s, done, failed, skipped = time.time(), 0.0, 0, [], []
+    spool_dir = Path("data/spool")
+    spool_dir.mkdir(parents=True, exist_ok=True)
+    reasons: Counter = Counter()
+
+    def submit(c: httpx.Client, docs: list[dict]) -> bool:
+        """Submit with retries; if the API stays unreachable, keep the results on disk."""
+        for attempt in range(4):
+            try:
+                c.post("/submissions", json=docs).raise_for_status()
+                return True
+            except httpx.HTTPError:
+                time.sleep(2 * 2**attempt)
+        with (spool_dir / f"previews-{int(time.time())}.jsonl").open("a") as f:
+            f.writelines(json.dumps(d) + "\n" for d in docs)
+        reasons["spooled (API unreachable; resent next run)"] += len(docs)
+        return False
+
+    with httpx.Client(base_url=api, headers=headers, timeout=300) as c:
+        for spool in sorted(spool_dir.glob("previews-*.jsonl")):  # results a previous run couldn't deliver
+            docs = [json.loads(x) for x in spool.read_text().splitlines() if x.strip()]
+            if docs and all(submit(c, docs[i : i + 25]) for i in range(0, len(docs), 25)):
+                spool.unlink()
+                print(f"resent {len(docs)} spooled results")
+
+        deezer = Deezer()
+        started, gpu_s, done, failed = time.time(), 0.0, 0, []
         attempted: set[str] = set()
         while len(attempted) < n:
             page = c.get("/wanted", params={"limit": 1000}).raise_for_status().json()
-            queue = [q for q in page if q.get("preview_url") and q["key"] not in attempted][
+            queue = [q for q in page if q.get("deezer_id") and q["key"] not in attempted][
                 : n - len(attempted)
             ]
             if not queue:
                 break
             attempted.update(q["key"] for q in queue)
-            print(f"pass: {len(queue)} songs (attempted {len(attempted)}/{n} this run)")
-            batches = [queue[i : i + batch] for i in range(0, len(queue), batch)]
+            # Fresh preview links from this machine, at a polite rate: GPU containers then only
+            # download audio and never hit Deezer's API (which throttles parallel callers).
+            ready = []
+            for q in queue:
+                url, why = _fresh_preview(deezer, q["deezer_id"])
+                if url:
+                    ready.append(q | {"preview_url": url})
+                else:
+                    reasons[why] += 1
+            print(
+                f"pass: {len(queue)} songs, {len(ready)} with fresh previews (attempted {len(attempted)}/{n})"
+            )
+            batches = [ready[i : i + batch] for i in range(0, len(ready), batch)]
             for res in Analyzer().analyze_previews.map(batches, order_outputs=False):
                 gpu_s += res["seconds"]
                 failed += res["failed"]
-                skipped += res["skipped"]
-                if res["docs"]:
-                    c.post("/submissions", json=res["docs"]).raise_for_status()
+                for sk in res["skipped"]:
+                    reasons["download failed: " + sk.rsplit(": ", 1)[-1][:60]] += 1
+                if res["docs"] and submit(c, res["docs"]):
                     done += len(res["docs"])
                 cost = gpu_s / 3600 * L4_PER_HOUR
-                print(f"{done} analysed · {len(failed)} failed · {len(skipped)} no preview · ${cost:.2f}")
+                print(
+                    f"{done} analysed · {len(failed)} failed · {sum(reasons.values())} skipped · ${cost:.2f}"
+                )
         wall = time.time() - started
     per_song = gpu_s / max(done, 1)
     print(
@@ -312,13 +373,12 @@ def previews(n: int = 200, batch: int = 10) -> None:
             {
                 "analysed": done,
                 "failed": len(failed),
-                "no_preview": len(skipped),
+                "skipped": dict(reasons),
                 "wall_minutes": round(wall / 60, 1),
                 "gpu_seconds_per_song": round(per_song, 1),
                 "est_cost_usd_this_run": round(gpu_s / 3600 * L4_PER_HOUR, 2),
                 "est_cost_usd_per_1000": round(per_song * 1000 / 3600 * L4_PER_HOUR, 2),
                 "sample_failures": failed[:5],
-                "sample_no_preview": skipped[:5],
             },
             indent=2,
         )

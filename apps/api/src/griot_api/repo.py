@@ -12,8 +12,31 @@ from griot_api.merge import carry_enrichment, merge
 from griot_core.schema import TrackFeatures
 
 
+def identity_row(t: TrackFeatures) -> dict:
+    """The few fields needed to identify, search and validate a recording — no features."""
+    p = t.popularity
+    return {
+        "id": t.id,
+        "tier": t.tier,
+        "isrc": t.isrc,
+        "mbid": t.mbid,
+        "deezer": t.external_ids.get("deezer"),
+        "artist": t.artist,
+        "title": t.title,
+        "duration_s": t.duration_s,
+        "bpm": t.global_.bpm,
+        "camelot": t.global_.camelot,
+        "year": t.year,
+        "playcount": p.lastfm_playcount or p.lb_listens or 0,
+        "tags": list(t.global_.tags)[:3],
+        "space": (t.embeddings.model, len(t.embeddings.full)),
+    }
+
+
 class Repo(Protocol):
     def all_tracks(self) -> list[TrackFeatures]: ...
+    def identities(self) -> list[dict]: ...
+    def get(self, track_id: str) -> TrackFeatures | None: ...
     def submit(self, submitter: str, docs: list[TrackFeatures]) -> list[str]: ...
     def save_bridge(self, request: dict, response: dict) -> str: ...
     def get_bridge(self, bridge_id: str) -> dict | None: ...
@@ -42,6 +65,12 @@ class MemoryRepo:
 
     def all_tracks(self) -> list[TrackFeatures]:
         return list(self.tracks.values())
+
+    def identities(self) -> list[dict]:
+        return [identity_row(t) for t in self.tracks.values()]
+
+    def get(self, track_id: str) -> TrackFeatures | None:
+        return self.tracks.get(track_id)
 
     def submit(self, submitter: str, docs: list[TrackFeatures]) -> list[str]:
         for d in docs:
@@ -102,6 +131,28 @@ class PgRepo:
         with self.pool.connection() as c:
             rows = c.execute("SELECT doc FROM recordings").fetchall()
         return [TrackFeatures.model_validate(r[0]) for r in rows]
+
+    def identities(self) -> list[dict]:
+        sql = """
+            SELECT id, tier, isrc, mbid::text, external_ids ->> 'deezer', artist, title, duration_s,
+                   bpm, camelot,
+                   year, coalesce(lastfm_playcount, lb_listens, 0),
+                   coalesce((SELECT array_agg(k) FROM (SELECT jsonb_object_keys(doc -> 'global' -> 'tags') k
+                                                        LIMIT 3) t), '{}'),
+                   doc -> 'embeddings' ->> 'model', jsonb_array_length(doc -> 'embeddings' -> 'full')
+            FROM recordings"""
+        keys = ("id", "tier", "isrc", "mbid", "deezer", "artist", "title", "duration_s", "bpm", "camelot",
+                "year", "playcount", "tags", "model", "dim")  # fmt: skip
+        with self.pool.connection() as c:
+            rows = [dict(zip(keys, r, strict=True)) for r in c.execute(sql).fetchall()]
+        for r in rows:
+            r["space"] = (r.pop("model"), r.pop("dim"))
+        return rows
+
+    def get(self, track_id: str) -> TrackFeatures | None:
+        with self.pool.connection() as c:
+            row = c.execute("SELECT doc FROM recordings WHERE id = %s", (track_id,)).fetchone()
+        return None if row is None else TrackFeatures.model_validate(row[0])
 
     def submit(self, submitter: str, docs: list[TrackFeatures]) -> list[str]:
         from psycopg.types.json import Jsonb
